@@ -1,5 +1,5 @@
 import streamlit as st
-from agent_core import run_research
+from agent_core import run_research, chat_with_ai, solve_math
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 from reportlab.lib.styles import ParagraphStyle
@@ -44,6 +44,8 @@ if "history"        not in st.session_state: st.session_state.history        = [
 if "current_report" not in st.session_state: st.session_state.current_report = None
 if "page"           not in st.session_state: st.session_state.page           = "home"
 if "research_topic" not in st.session_state: st.session_state.research_topic = ""
+if "chat_messages"  not in st.session_state: st.session_state.chat_messages  = []
+if "chat_tab"       not in st.session_state: st.session_state.chat_tab       = "chat"
 
 st.set_page_config(page_title="ResearchAI", page_icon="🔬",
                    layout="wide", initial_sidebar_state="collapsed")
@@ -451,85 +453,323 @@ if st.session_state.page == "home" and not st.session_state.current_report:
             st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
-# RESEARCH PAGE
+# RESEARCH PAGE  (Dual-Mode: Chat AI + Deep Research)
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.page == "research" and not st.session_state.current_report:
 
+    # Mermaid.js injection (loads once per page render)
+    st.markdown("""
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+      document.addEventListener('DOMContentLoaded', function() {
+        if (window.mermaid) { mermaid.initialize({startOnLoad:true, theme:'dark'}); }
+      });
+      // Also try to init after a short delay for Streamlit dynamic rendering
+      setTimeout(function() {
+        if (window.mermaid) { mermaid.init(undefined, document.querySelectorAll('.mermaid')); }
+      }, 800);
+    </script>
+    """, unsafe_allow_html=True)
+
+    # ── Page header ──────────────────────────────────────────────────────────
     st.markdown(f"""
-    <div style='text-align:center;padding:2.5rem 0 1.2rem 0;'>
-      <div style='display:inline-block;background:rgba(37,99,235,0.1);color:{ACCENT};
-                  font-size:0.82rem;font-weight:600;padding:0.3rem 1rem;
-                  border-radius:20px;margin-bottom:1rem;
-                  border:1px solid rgba(37,99,235,0.2);'>
-        🔍 AI Research Engine
-      </div>
-      <h1 style='font-size:2.4rem;font-weight:800;color:{TEXT};line-height:1.25;margin-bottom:0.8rem;'>
-        Research Any <span style='color:{ACCENT};'>Topic Instantly</span>
+    <div style='text-align:center;padding:2rem 0 0.8rem 0;'>
+      <h1 style='font-size:2.2rem;font-weight:800;color:{TEXT};line-height:1.25;margin-bottom:0.4rem;'>
+        🤖 ResearchAI <span style='color:{ACCENT};'>Assistant</span>
       </h1>
-      <p style='color:{SUBTEXT};font-size:1rem;max-width:520px;margin:0 auto;line-height:1.7;'>
-        Ask anything — our AI agent searches the web, analyzes sources,
-        and delivers a professional report in under 30 seconds.
+      <p style='color:{SUBTEXT};font-size:0.95rem;max-width:520px;margin:0 auto;'>
+        Chat with AI · Solve math · Generate flowcharts · Deep web research
       </p>
     </div>
     """, unsafe_allow_html=True)
 
-    r1, r2, r3 = st.columns([0.5, 3, 0.5])
-    with r2:
-        res_topic = st.text_input("",
-            placeholder="💡  e.g. Impact of Quantum Computing on Cryptography",
-            label_visibility="collapsed", key="res_input")
-        st.markdown("<div style='height:0.5rem'></div>", unsafe_allow_html=True)
-        res_btn = st.button("🚀  Generate Research Report", type="primary", key="res_btn")
-
+    # ── Tab switcher ─────────────────────────────────────────────────────────
     st.markdown(f"""
-    <div style='display:grid;grid-template-columns:repeat(3,1fr);gap:0.9rem;margin:1.8rem 0 0.5rem 0;'>
-      <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:12px;
-                  padding:1.1rem;text-align:center;'>
-        <div style='font-size:1.6rem;'>⚡</div>
-        <div style='font-weight:700;font-size:0.9rem;color:{TEXT};margin-top:0.3rem;'>30s Average</div>
-        <div style='font-size:0.78rem;color:{SUBTEXT};'>Fast AI inference</div>
-      </div>
-      <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:12px;
-                  padding:1.1rem;text-align:center;'>
-        <div style='font-size:1.6rem;'>🌐</div>
-        <div style='font-weight:700;font-size:0.9rem;color:{TEXT};margin-top:0.3rem;'>5+ Sources</div>
-        <div style='font-size:0.78rem;color:{SUBTEXT};'>Real-time web data</div>
-      </div>
-      <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:12px;
-                  padding:1.1rem;text-align:center;'>
-        <div style='font-size:1.6rem;'>📄</div>
-        <div style='font-weight:700;font-size:0.9rem;color:{TEXT};margin-top:0.3rem;'>PDF Export</div>
-        <div style='font-size:0.78rem;color:{SUBTEXT};'>Download instantly</div>
-      </div>
-    </div>
+    <style>
+    .tab-bar{{display:flex;gap:0.5rem;margin:1rem 0 1.5rem 0;}}
+    .tab-bar .stButton>button{{
+      border-radius:22px!important;font-size:0.9rem!important;
+      font-weight:600!important;padding:0.45rem 1.3rem!important;
+    }}
+    .chat-bubble-user{{
+      display:flex;justify-content:flex-end;margin:0.5rem 0;
+    }}
+    .chat-bubble-user .bubble{{
+      background:{ACCENT};color:white;
+      border-radius:18px 18px 4px 18px;
+      padding:0.75rem 1.1rem;max-width:72%;
+      font-size:0.93rem;line-height:1.55;
+    }}
+    .chat-bubble-ai{{
+      display:flex;justify-content:flex-start;margin:0.5rem 0;
+      gap:0.6rem;align-items:flex-start;
+    }}
+    .chat-bubble-ai .avatar{{
+      width:34px;height:34px;border-radius:50%;
+      background:{ACCENT};display:flex;align-items:center;
+      justify-content:center;font-size:1rem;flex-shrink:0;margin-top:2px;
+    }}
+    .chat-bubble-ai .bubble{{
+      background:{CARD_BG};border:1px solid {BORDER};
+      border-radius:4px 18px 18px 18px;
+      padding:0.75rem 1.1rem;max-width:78%;
+      font-size:0.93rem;line-height:1.6;color:{TEXT};
+    }}
+    .math-box{{
+      background:rgba(37,99,235,0.1);border:1px solid rgba(37,99,235,0.3);
+      border-radius:10px;padding:0.8rem 1.1rem;margin-top:0.6rem;
+      font-family:monospace;color:{ACCENT};font-size:0.92rem;
+    }}
+    .mermaid{{
+      margin-top:0.8rem;
+      background:{CARD_BG}!important;
+      border-radius:12px;padding:1rem;
+    }}
+    </style>
     """, unsafe_allow_html=True)
 
-    if st.session_state.history:
-        st.markdown(f"<div style='font-weight:700;color:{TEXT};font-size:0.95rem;margin-top:1.5rem;margin-bottom:0.6rem;'>📂 Recent Searches</div>", unsafe_allow_html=True)
-        for item in reversed(st.session_state.history[-5:]):
-            st.markdown(f"""
-            <div class='hist-item'>
-              <div class='hist-title'>📄 {item['topic']}</div>
-              <div class='hist-date'>{item['time']}</div>
-            </div>""", unsafe_allow_html=True)
+    t1, t2, t3 = st.columns([1.2, 1.5, 3])
+    with t1:
+        if st.button("💬 Chat AI",
+                     type="primary" if st.session_state.chat_tab == "chat" else "secondary",
+                     key="tab_chat"):
+            st.session_state.chat_tab = "chat"
+            st.rerun()
+    with t2:
+        if st.button("🔍 Deep Research",
+                     type="primary" if st.session_state.chat_tab == "research" else "secondary",
+                     key="tab_research"):
+            st.session_state.chat_tab = "research"
+            st.rerun()
 
-    if res_btn and res_topic:
-        with st.spinner("🤖 AI Agent is researching... ⏳"):
-            try:
-                report, steps = run_research(res_topic)
-                st.session_state.history.append({
-                    "topic": res_topic, "report": report,
-                    "steps": steps,
-                    "time": datetime.now().strftime("%b %d, %H:%M")
-                })
-                st.session_state.current_report = {
-                    "topic": res_topic, "report": report, "steps": steps
-                }
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Error: {str(e)}")
-    elif res_btn:
-        st.warning("⚠️ Please enter a research topic!")
+    st.markdown("<hr style='border:none;border-top:1px solid " + BORDER + ";margin:0 0 1.2rem 0;'>",
+                unsafe_allow_html=True)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # TAB 1 — CHAT AI
+    # ══════════════════════════════════════════════════════════════════════════
+    if st.session_state.chat_tab == "chat":
+
+        if not st.session_state.chat_messages:
+            st.markdown(f"""
+            <div style='margin-bottom:1.2rem;'>
+              <div style='color:{SUBTEXT};font-size:0.82rem;font-weight:600;
+                          text-transform:uppercase;letter-spacing:0.05em;
+                          margin-bottom:0.6rem;'>Try asking...</div>
+              <div style='display:flex;flex-wrap:wrap;gap:0.5rem;'>
+                {''.join([
+                    f"<span style='background:{CARD_BG};border:1px solid {BORDER};"
+                    f"border-radius:20px;padding:0.35rem 0.9rem;font-size:0.83rem;"
+                    f"color:{SUBTEXT};'>{p}</span>"
+                    for p in [
+                        "Explain quantum computing simply",
+                        "Solve x² - 5x + 6 = 0",
+                        "Flowchart of how the internet works",
+                        "What is machine learning?",
+                        "Calculate 15% of 3,450",
+                        "Diagram of photosynthesis process",
+                    ]
+                ])}
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        import re
+        import streamlit.components.v1 as components
+
+        for msg in st.session_state.chat_messages:
+            if msg["role"] == "user":
+                st.markdown(f"""
+                <div class='chat-bubble-user'>
+                  <div class='bubble'>{msg['content']}</div>
+                </div>""", unsafe_allow_html=True)
+            else:
+                content = msg["content"]
+                mermaid_pattern = r'```mermaid\s*([\s\S]*?)```'
+                parts = re.split(mermaid_pattern, content)
+
+                for i, part in enumerate(parts):
+                    if i % 2 == 0:
+                        if part.strip():
+                            st.markdown(f"""
+                            <div class='chat-bubble-ai'>
+                              <div class='avatar'>🤖</div>
+                              <div class='bubble'>{part.strip()}</div>
+                            </div>""", unsafe_allow_html=True)
+                    else:
+                        mermaid_theme = "dark" if dark else "default"
+                        clean_mermaid = part.strip().replace('"', "'")
+                        components.html(f"""
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                          <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+                          <style>
+                            body {{
+                              background:{'#161b22' if dark else '#ffffff'};
+                              margin:0; padding:1rem;
+                            }}
+                            .mermaid {{ text-align:center; }}
+                            .error-box {{
+                              background:rgba(239,68,68,0.1);
+                              border:1px solid rgba(239,68,68,0.3);
+                              border-radius:10px; padding:1rem;
+                              color:#ef4444; font-size:0.85rem;
+                            }}
+                            .code-box {{
+                              background:{'#21262d' if dark else '#f3f4f6'};
+                              border-radius:8px; padding:0.8rem;
+                              font-family:monospace; font-size:0.8rem;
+                              color:{'#e6edf3' if dark else '#1e293b'};
+                              white-space:pre-wrap; margin-top:0.5rem;
+                            }}
+                          </style>
+                        </head>
+                        <body>
+                          <div id="diagram" class="mermaid">{clean_mermaid}</div>
+                          <div id="fallback" style="display:none;">
+                            <div class="error-box">
+                              ⚠️ Could not render diagram. Raw code:
+                              <div class="code-box">{clean_mermaid}</div>
+                            </div>
+                          </div>
+                          <script>
+                            mermaid.initialize({{
+                              startOnLoad: false,
+                              theme: '{mermaid_theme}',
+                              securityLevel: 'loose'
+                            }});
+                            mermaid.run({{
+                              nodes: [document.getElementById('diagram')]
+                            }}).catch((err) => {{
+                              document.getElementById('diagram').style.display='none';
+                              document.getElementById('fallback').style.display='block';
+                            }});
+                          </script>
+                        </body>
+                        </html>
+                        """, height=380, scrolling=True)
+
+                if "math_result" in msg and msg["math_result"]:
+                    st.markdown(f"""
+                    <div class='chat-bubble-ai'>
+                      <div class='avatar'>🔢</div>
+                      <div class='bubble'>
+                        <div class='math-box'>{msg['math_result']}</div>
+                      </div>
+                    </div>""", unsafe_allow_html=True)
+
+        chat_col1, chat_col2 = st.columns([6, 1])
+        with chat_col1:
+            user_input = st.text_input("Message",
+                placeholder="Ask anything — math, flowcharts, questions...",
+                label_visibility="collapsed", key="chat_input")
+        with chat_col2:
+            send_btn = st.button("Send ➤", type="primary", key="send_btn")
+
+        cl1, cl2 = st.columns([5, 1])
+        with cl2:
+            if st.session_state.chat_messages:
+                if st.button("🗑 Clear", key="clear_chat"):
+                    st.session_state.chat_messages = []
+                    st.rerun()
+
+        if send_btn and user_input:
+            st.session_state.chat_messages.append({
+                "role": "user", "content": user_input
+            })
+            with st.spinner("🤖 Thinking..."):
+                try:
+                    ai_reply = chat_with_ai(
+                        st.session_state.chat_messages)
+                    math_result = ""
+                    math_keywords = ["solve", "calculate", "compute",
+                                     "=", "x^", "x²", "sqrt",
+                                     "integral", "derivative", "%"]
+                    if any(kw in user_input.lower()
+                           for kw in math_keywords):
+                        math_result = solve_math(
+                            user_input.replace("solve","").strip())
+                    st.session_state.chat_messages.append({
+                        "role": "assistant",
+                        "content": ai_reply,
+                        "math_result": math_result
+                    })
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
+        elif send_btn:
+            st.warning("⚠️ Please type a message first!")
+        st.markdown(f"""
+                    <div style='margin-bottom:1.2rem;'>
+          <div style='font-weight:700;font-size:1rem;color:{TEXT};margin-bottom:0.3rem;'>
+            🔍 AI-Powered Web Research
+          </div>
+          <div style='color:{SUBTEXT};font-size:0.88rem;'>
+            Enter a topic — our agent searches 5+ live sources and writes a structured report.
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        r1, r2, r3 = st.columns([0.2, 4, 0.2])
+        with r2:
+            res_topic = st.text_input("",
+                placeholder="💡  e.g. Impact of Quantum Computing on Cryptography",
+                label_visibility="collapsed", key="res_input")
+            st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
+            res_btn = st.button("🚀  Generate Research Report", type="primary", key="res_btn")
+
+        st.markdown(f"""
+        <div style='display:grid;grid-template-columns:repeat(3,1fr);gap:0.8rem;margin:1.5rem 0;'>
+          <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:12px;
+                      padding:1rem;text-align:center;'>
+            <div style='font-size:1.5rem;'>⚡</div>
+            <div style='font-weight:700;font-size:0.88rem;color:{TEXT};margin-top:0.3rem;'>~30s</div>
+            <div style='font-size:0.76rem;color:{SUBTEXT};'>Fast inference</div>
+          </div>
+          <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:12px;
+                      padding:1rem;text-align:center;'>
+            <div style='font-size:1.5rem;'>🌐</div>
+            <div style='font-weight:700;font-size:0.88rem;color:{TEXT};margin-top:0.3rem;'>5+ Sources</div>
+            <div style='font-size:0.76rem;color:{SUBTEXT};'>Real-time web</div>
+          </div>
+          <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:12px;
+                      padding:1rem;text-align:center;'>
+            <div style='font-size:1.5rem;'>📄</div>
+            <div style='font-weight:700;font-size:0.88rem;color:{TEXT};margin-top:0.3rem;'>PDF Export</div>
+            <div style='font-size:0.76rem;color:{SUBTEXT};'>Download ready</div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if st.session_state.history:
+            st.markdown(f"<div style='font-weight:700;color:{TEXT};font-size:0.9rem;"
+                        f"margin-bottom:0.5rem;'>📂 Recent Reports</div>",
+                        unsafe_allow_html=True)
+            for item in reversed(st.session_state.history[-4:]):
+                st.markdown(f"""
+                <div class='hist-item'>
+                  <div class='hist-title'>📄 {item['topic']}</div>
+                  <div class='hist-date'>{item['time']}</div>
+                </div>""", unsafe_allow_html=True)
+
+        if res_btn and res_topic:
+            with st.spinner("🤖 AI Agent is researching... ⏳"):
+                try:
+                    report, steps = run_research(res_topic)
+                    st.session_state.history.append({
+                        "topic": res_topic, "report": report,
+                        "steps": steps,
+                        "time": datetime.now().strftime("%b %d, %H:%M")
+                    })
+                    st.session_state.current_report = {
+                        "topic": res_topic, "report": report, "steps": steps
+                    }
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error: {str(e)}")
+        elif res_btn:
+            st.warning("⚠️ Please enter a research topic!")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # HOW IT WORKS PAGE

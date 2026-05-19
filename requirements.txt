@@ -6,3 +6,4 @@ tavily-python
 streamlit
 python-dotenv
 reportlab
+sympy
