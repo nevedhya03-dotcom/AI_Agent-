@@ -6,9 +6,11 @@ from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import cm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 from reportlab.lib.enums import TA_CENTER
-import io
+import io, re
 from datetime import datetime
+import streamlit.components.v1 as components
 
+# ── PDF Generator ──────────────────────────────────────────────────────────────
 def generate_pdf(topic, report_text):
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=A4,
@@ -39,803 +41,964 @@ def generate_pdf(topic, report_text):
     buffer.seek(0)
     return buffer
 
-if "dark_mode"      not in st.session_state: st.session_state.dark_mode      = False
-if "history"        not in st.session_state: st.session_state.history        = []
-if "current_report" not in st.session_state: st.session_state.current_report = None
-if "page"           not in st.session_state: st.session_state.page           = "home"
-if "research_topic" not in st.session_state: st.session_state.research_topic = ""
-if "chat_messages"  not in st.session_state: st.session_state.chat_messages  = []
-if "chat_tab"       not in st.session_state: st.session_state.chat_tab       = "chat"
+# ── Session State ──────────────────────────────────────────────────────────────
+for k,v in {
+    "dark_mode": False,
+    "history": [],
+    "current_report": None,
+    "page": "home",
+    "chat_messages": [],
+}.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 st.set_page_config(page_title="ResearchAI", page_icon="🔬",
                    layout="wide", initial_sidebar_state="collapsed")
 
 dark = st.session_state.dark_mode
 
-BG       = "#0d1117"      if dark else "#f9fafb"
-CARD_BG  = "#161b22"      if dark else "#ffffff"
-CARD2    = "#21262d"      if dark else "#f3f4f6"
-TEXT     = "#e6edf3"      if dark else "#111827"
-SUBTEXT  = "#8b949e"      if dark else "#6b7280"
-BORDER   = "#30363d"      if dark else "#e5e7eb"
-ACCENT   = "#2563eb"
-NAV_BG   = "#161b22"      if dark else "#ffffff"
-INPUT_BG = "#0d1117"      if dark else "#ffffff"
-HOVER    = "rgba(37,99,235,0.12)" if dark else "rgba(37,99,235,0.06)"
-SHADOW   = "rgba(0,0,0,0.5)"      if dark else "rgba(0,0,0,0.06)"
-T_BG     = "#2563eb"      if dark else "#e5e7eb"
-T_POS    = "22px"         if dark else "2px"
-T_ICON   = "🌙"           if dark else "☀️"
+# ── Theme ──────────────────────────────────────────────────────────────────────
+# Fixed navbar color (works for both themes)
+NAV_FIXED  = "#1a1f2e"
+NAV_TEXT   = "#cbd5e1"
+NAV_HOVER  = "rgba(255,255,255,0.1)"
 
+# Page colors
+BG         = "#0d1117"      if dark else "#eef2f7"
+CARD_BG    = "#161b22"      if dark else "#ffffff"
+CARD2      = "#21262d"      if dark else "#f8fafc"
+TEXT       = "#e6edf3"      if dark else "#111827"
+SUBTEXT    = "#8b949e"      if dark else "#6b7280"
+BORDER     = "#30363d"      if dark else "#e2e8f0"
+ACCENT     = "#3b82f6"
+ACCENT2    = "#8b5cf6"
+INPUT_BG   = "#0d1117"      if dark else "#ffffff"
+HOVER      = "rgba(59,130,246,0.12)" if dark else "rgba(59,130,246,0.06)"
+SHADOW     = "rgba(0,0,0,0.4)"       if dark else "rgba(0,0,0,0.08)"
+
+# Footer inverted (point 2)
+FOOT_BG    = "#f8fafc"      if dark else "#0f172a"
+FOOT_TEXT  = "#475569"      if dark else "rgba(255,255,255,0.6)"
+FOOT_HEAD  = "#1e293b"      if dark else "#ffffff"
+
+# ── CSS ────────────────────────────────────────────────────────────────────────
 st.markdown(f"""
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
+/* ── Reset ── */
 *,*::before,*::after{{box-sizing:border-box;margin:0;padding:0;}}
+
+/* ── App bg ── */
 .stApp,[data-testid="stAppViewContainer"],[data-testid="stAppViewBlockContainer"],
-[data-testid="stMain"],.main{{background-color:{BG}!important;color:{TEXT}!important;}}
-header[data-testid="stHeader"],[data-testid="stToolbar"],[data-testid="stDecoration"],
-[data-testid="stStatusWidget"],.stDeployButton,#MainMenu,footer,
+[data-testid="stMain"],.main{{
+  background-color:{BG}!important;
+  color:{TEXT}!important;
+  font-family:'Inter',sans-serif!important;
+}}
+
+/* ── Hide Streamlit chrome ── */
+header[data-testid="stHeader"],[data-testid="stToolbar"],
+[data-testid="stDecoration"],[data-testid="stStatusWidget"],
+.stDeployButton,#MainMenu,footer,
 .viewerBadge_container__r5tak{{display:none!important;}}
 .block-container{{padding:0!important;max-width:100%!important;}}
 section.main>div{{padding:0!important;}}
 section[data-testid="stSidebar"]{{display:none!important;}}
 [data-testid="collapsedControl"]{{display:none!important;}}
+
+/* ── Text ── */
 p,h1,h2,h3,h4,span,label,li{{color:{TEXT}!important;}}
-.stTextInput>div>div>input{{background:{INPUT_BG}!important;
-  border:1.5px solid {BORDER}!important;border-radius:10px!important;
-  color:{TEXT}!important;font-size:1rem!important;
-  padding:0.7rem 1.2rem!important;width:100%!important;}}
-.stTextInput>div>div>input:focus{{border-color:{ACCENT}!important;
-  box-shadow:0 0 0 3px rgba(37,99,235,0.12)!important;}}
+
+/* ── Input ── */
+.stTextInput>div>div>input{{
+  background:{INPUT_BG}!important;border:1.5px solid {BORDER}!important;
+  border-radius:10px!important;color:{TEXT}!important;font-size:1rem!important;
+  padding:0.7rem 1.2rem!important;font-family:'Inter',sans-serif!important;
+}}
+.stTextInput>div>div>input:focus{{
+  border-color:{ACCENT}!important;
+  box-shadow:0 0 0 3px rgba(59,130,246,0.15)!important;
+}}
 .stTextInput>div>div>input::placeholder{{color:{SUBTEXT}!important;}}
 .stTextInput label{{display:none!important;}}
-.stButton>button{{background:transparent!important;color:{SUBTEXT}!important;
+
+/* ── Buttons reset ── */
+.stButton>button{{
+  background:transparent!important;color:{SUBTEXT}!important;
   border:none!important;font-size:0.88rem!important;font-weight:500!important;
   padding:0.42rem 0.9rem!important;border-radius:7px!important;
-  transition:all 0.18s!important;width:auto!important;cursor:pointer!important;}}
+  transition:all 0.18s!important;width:auto!important;
+  font-family:'Inter',sans-serif!important;
+}}
 .stButton>button:hover{{background:{HOVER}!important;color:{ACCENT}!important;}}
-button[kind="primary"]{{background:{ACCENT}!important;color:white!important;
-  border:none!important;font-weight:700!important;font-size:0.95rem!important;
-  padding:0.65rem 2rem!important;border-radius:10px!important;width:100%!important;
-  box-shadow:0 4px 14px rgba(37,99,235,0.3)!important;transition:all 0.2s!important;}}
-button[kind="primary"]:hover{{opacity:0.88!important;transform:translateY(-1px)!important;}}
-.stDownloadButton>button{{background:transparent!important;color:{ACCENT}!important;
-  border:2px solid {ACCENT}!important;border-radius:8px!important;
-  font-weight:600!important;padding:0.5rem 1rem!important;width:100%!important;}}
-.stDownloadButton>button:hover{{background:{ACCENT}!important;color:white!important;}}
+
+button[kind="primary"]{{
+  background:linear-gradient(135deg,{ACCENT},{ACCENT2})!important;
+  color:white!important;border:none!important;font-weight:700!important;
+  font-size:0.95rem!important;padding:0.65rem 2rem!important;
+  border-radius:12px!important;width:100%!important;
+  box-shadow:0 4px 20px rgba(59,130,246,0.35)!important;
+  transition:all 0.2s!important;font-family:'Inter',sans-serif!important;
+}}
+button[kind="primary"]:hover{{
+  opacity:0.9!important;transform:translateY(-1px)!important;
+  box-shadow:0 6px 24px rgba(59,130,246,0.45)!important;
+}}
+
+.stDownloadButton>button{{
+  background:transparent!important;color:{ACCENT}!important;
+  border:2px solid {ACCENT}!important;border-radius:10px!important;
+  font-weight:600!important;padding:0.55rem 1rem!important;width:100%!important;
+  transition:all 0.2s!important;
+}}
+.stDownloadButton>button:hover{{
+  background:{ACCENT}!important;color:white!important;
+}}
+
+/* ── Spinner ── */
 .stSpinner>div{{border-top-color:{ACCENT}!important;}}
-.card{{background:{CARD_BG};border:1px solid {BORDER};border-radius:14px;
-  padding:1.5rem;margin-bottom:1rem;box-shadow:0 2px 8px {SHADOW};}}
-.feat-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-top:2rem;}}
-.feat-card{{background:{CARD_BG};border:1px solid {BORDER};border-radius:14px;
-  padding:1.8rem 1rem;text-align:center;transition:all 0.22s;
-  box-shadow:0 1px 4px {SHADOW};}}
-.feat-card:hover{{border-color:{ACCENT};
-  box-shadow:0 6px 20px rgba(37,99,235,0.15);transform:translateY(-3px);}}
-.feat-icon{{font-size:2.2rem;margin-bottom:0.6rem;}}
+
+/* ── Cards ── */
+.card{{
+  background:{CARD_BG};border:1px solid {BORDER};border-radius:16px;
+  padding:1.5rem;margin-bottom:1rem;box-shadow:0 2px 12px {SHADOW};
+  transition:all 0.2s;
+}}
+.card:hover{{box-shadow:0 4px 24px {SHADOW};}}
+
+/* ── ANIMATIONS ── */
+@keyframes fadeInUp {{
+  from{{opacity:0;transform:translateY(20px);}}
+  to{{opacity:1;transform:translateY(0);}}
+}}
+@keyframes fadeIn {{
+  from{{opacity:0;}} to{{opacity:1;}}
+}}
+@keyframes float {{
+  0%,100%{{transform:translateY(0);}}
+  50%{{transform:translateY(-6px);}}
+}}
+@keyframes gradientShift {{
+  0%{{background-position:0% 50%;}}
+  50%{{background-position:100% 50%;}}
+  100%{{background-position:0% 50%;}}
+}}
+@keyframes pulse {{
+  0%,100%{{box-shadow:0 0 0 0 rgba(59,130,246,0.3);}}
+  50%{{box-shadow:0 0 0 12px rgba(59,130,246,0);}}
+}}
+@keyframes slideIn {{
+  from{{opacity:0;transform:translateX(-10px);}}
+  to{{opacity:1;transform:translateX(0);}}
+}}
+@keyframes shimmer {{
+  0%{{background-position:-200% 0;}}
+  100%{{background-position:200% 0;}}
+}}
+
+.fade-in{{animation:fadeIn 0.5s ease forwards;}}
+.fade-in-up{{animation:fadeInUp 0.6s ease forwards;}}
+.float{{animation:float 3s ease-in-out infinite;}}
+.pulse-btn{{animation:pulse 2s ease infinite;}}
+.slide-in{{animation:slideIn 0.4s ease forwards;}}
+
+/* ── Gradient text ── */
+.grad-text{{
+  background:linear-gradient(135deg,{ACCENT},{ACCENT2},#ec4899);
+  background-size:200% 200%;
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  animation:gradientShift 4s ease infinite;
+}}
+
+/* ── Feature cards ── */
+.feat-grid{{
+  display:grid;grid-template-columns:repeat(3,1fr);
+  gap:1.2rem;margin-top:2rem;
+}}
+.feat-card{{
+  background:{CARD_BG};border:1px solid {BORDER};border-radius:16px;
+  padding:1.8rem 1.2rem;text-align:center;transition:all 0.28s;
+  box-shadow:0 2px 8px {SHADOW};position:relative;overflow:hidden;
+}}
+.feat-card::before{{
+  content:'';position:absolute;top:0;left:0;right:0;height:3px;
+  background:linear-gradient(90deg,{ACCENT},{ACCENT2});
+  transform:scaleX(0);transition:transform 0.3s;
+}}
+.feat-card:hover::before{{transform:scaleX(1);}}
+.feat-card:hover{{
+  border-color:{ACCENT};transform:translateY(-4px);
+  box-shadow:0 8px 28px rgba(59,130,246,0.18);
+}}
+.feat-icon{{font-size:2.4rem;margin-bottom:0.7rem;}}
 .feat-title{{font-weight:700;font-size:1rem;color:{TEXT};}}
-.feat-desc{{font-size:0.83rem;color:{SUBTEXT};margin-top:0.35rem;}}
-.step-card{{background:{CARD_BG};border:1px solid {BORDER};border-radius:14px;
-  padding:1.8rem 1rem;text-align:center;box-shadow:0 1px 4px {SHADOW};}}
-.step-num{{background:{ACCENT};color:white!important;width:40px;height:40px;
-  border-radius:50%;display:flex;align-items:center;justify-content:center;
-  font-weight:700;font-size:1.1rem;margin:0 auto 0.8rem auto;}}
+.feat-desc{{font-size:0.83rem;color:{SUBTEXT};margin-top:0.4rem;line-height:1.6;}}
+
+/* ── Stat cards ── */
+.stat-grid{{
+  display:grid;grid-template-columns:repeat(4,1fr);
+  gap:1rem;margin:1.5rem 0;
+}}
+.stat-card{{
+  background:{CARD_BG};border:1px solid {BORDER};border-radius:14px;
+  padding:1.3rem;text-align:center;box-shadow:0 2px 8px {SHADOW};
+  transition:all 0.2s;
+}}
+.stat-card:hover{{transform:translateY(-2px);border-color:{ACCENT};}}
+.stat-num{{
+  font-size:1.9rem;font-weight:800;
+  background:linear-gradient(135deg,{ACCENT},{ACCENT2});
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+}}
+.stat-label{{font-size:0.8rem;color:{SUBTEXT};margin-top:0.2rem;}}
+
+/* ── Step cards ── */
+.step-card{{
+  background:{CARD_BG};border:1px solid {BORDER};border-radius:16px;
+  padding:1.8rem 1rem;text-align:center;box-shadow:0 2px 8px {SHADOW};
+  transition:all 0.2s;
+}}
+.step-card:hover{{border-color:{ACCENT};transform:translateY(-3px);}}
+.step-num{{
+  background:linear-gradient(135deg,{ACCENT},{ACCENT2});
+  color:white!important;width:42px;height:42px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  font-weight:800;font-size:1.1rem;margin:0 auto 0.8rem auto;
+  box-shadow:0 4px 12px rgba(59,130,246,0.35);
+}}
 .step-title{{font-weight:700;font-size:0.95rem;}}
-.step-desc{{font-size:0.82rem;color:{SUBTEXT};margin-top:0.4rem;}}
-.hist-item{{padding:0.65rem 0.85rem;border-radius:8px;margin-bottom:0.4rem;
-  border:1px solid {BORDER};background:{BG};transition:all 0.18s;}}
+.step-desc{{font-size:0.82rem;color:{SUBTEXT};margin-top:0.4rem;line-height:1.5;}}
+
+/* ── History ── */
+.hist-item{{
+  padding:0.65rem 0.85rem;border-radius:10px;margin-bottom:0.4rem;
+  border:1px solid {BORDER};background:{BG};transition:all 0.18s;
+}}
 .hist-item:hover{{border-color:{ACCENT};background:{HOVER};}}
 .hist-title{{font-size:0.82rem;font-weight:600;}}
 .hist-date{{font-size:0.73rem;color:{SUBTEXT};margin-top:2px;}}
-.badge{{display:block;background:rgba(37,99,235,0.08);color:{ACCENT}!important;
+
+/* ── Badge ── */
+.badge{{
+  display:block;background:rgba(59,130,246,0.1);color:{ACCENT}!important;
   border-radius:6px;padding:0.28rem 0.65rem;font-size:0.8rem;
-  font-weight:600;margin-bottom:0.5rem;}}
-.report-text{{font-size:0.95rem;line-height:1.8;color:{TEXT};white-space:pre-wrap;}}
-.stat-grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin:1.5rem 0;}}
-.stat-card{{background:{CARD_BG};border:1px solid {BORDER};border-radius:12px;
-  padding:1.2rem;text-align:center;box-shadow:0 1px 4px {SHADOW};}}
-.stat-num{{font-size:1.8rem;font-weight:800;color:{ACCENT};margin-bottom:0.2rem;}}
-.stat-label{{font-size:0.82rem;color:{SUBTEXT};}}
-.badge-new{{display:inline-block;background:linear-gradient(135deg,#10b981,#059669);
-  color:white!important;font-size:0.7rem;font-weight:700;padding:0.15rem 0.5rem;
-  border-radius:20px;margin-left:0.4rem;vertical-align:middle;}}
-/* Toggle */
-.toggle-track{{width:48px;height:26px;background:{T_BG};border-radius:13px;
-  position:relative;transition:background 0.3s;display:inline-flex;
-  align-items:center;cursor:pointer;border:1px solid rgba(255,255,255,0.1);}}
-.toggle-dot{{width:22px;height:22px;background:white;border-radius:50%;
-  position:absolute;left:{T_POS};transition:left 0.3s;
-  box-shadow:0 1px 4px rgba(0,0,0,0.3);display:flex;
-  align-items:center;justify-content:center;font-size:12px;}}
-</style>
-""", unsafe_allow_html=True)
-
-# ── TOP NAVBAR ────────────────────────────────────────────────────────────────
-st.markdown(f"""
-<style>
-/* ---- Navbar wrapper ---- */
-.navbar-outer{{
-  position:sticky;top:0;z-index:999;
-  background:{NAV_BG};
-  border-bottom:1px solid {BORDER};
-  box-shadow:0 2px 14px {SHADOW};
-  width:100%;
+  font-weight:600;margin-bottom:0.5rem;
 }}
-/* Hide all default Streamlit chrome inside navbar */
-.navbar-outer .stButton>button{{
-  background:transparent!important;
-  border:none!important;
-  color:{SUBTEXT}!important;
-  font-size:0.88rem!important;
-  font-weight:500!important;
-  padding:0.36rem 1.05rem!important;
-  border-radius:24px!important;
-  transition:all 0.17s!important;
-  white-space:nowrap!important;
-  box-shadow:none!important;
-}}
-.navbar-outer .stButton>button:hover{{
-  background:{'rgba(255,255,255,0.09)' if dark else 'rgba(0,0,0,0.07)'}!important;
-  color:{TEXT}!important;
-}}
-/* Logo */
-.nav-logo-txt{{
-  font-size:1.18rem;font-weight:800;
-  color:{ACCENT};white-space:nowrap;
-  padding:0 0.5rem;
-}}
-/* Pills container */
-.nav-pills-box{{
-  display:flex;align-items:center;
-  background:{'rgba(255,255,255,0.06)' if dark else 'rgba(0,0,0,0.05)'};
-  border-radius:30px;padding:3px 5px;
-  gap:1px;
-}}
-/* GitHub button */
-.gh-link-btn{{
-  background:{ACCENT}!important;
-  color:#ffffff!important;
-  padding:0.4rem 1.15rem!important;
-  border-radius:22px!important;
-  font-weight:700!important;
-  font-size:0.86rem!important;
-  border:none!important;
-  text-decoration:none;
+.badge-pill{{
   display:inline-block;
-  transition:opacity 0.18s;
+  background:linear-gradient(135deg,rgba(59,130,246,0.15),rgba(139,92,246,0.15));
+  color:{ACCENT}!important;border:1px solid rgba(59,130,246,0.25);
+  border-radius:20px;padding:0.22rem 0.75rem;
+  font-size:0.75rem;font-weight:700;margin-left:0.4rem;vertical-align:middle;
 }}
-.gh-link-btn:hover{{opacity:0.82;}}
+
+/* ── Report text ── */
+.report-text{{font-size:0.95rem;line-height:1.85;color:{TEXT};white-space:pre-wrap;}}
+
+/* ── Chat bubbles ── */
+.chat-bubble-user{{
+  display:flex;justify-content:flex-end;margin:0.6rem 0;
+  animation:slideIn 0.3s ease;
+}}
+.chat-bubble-user .bubble{{
+  background:linear-gradient(135deg,{ACCENT},{ACCENT2});color:white;
+  border-radius:18px 18px 4px 18px;padding:0.8rem 1.1rem;max-width:70%;
+  font-size:0.93rem;line-height:1.55;
+  box-shadow:0 4px 12px rgba(59,130,246,0.25);
+}}
+.chat-bubble-ai{{
+  display:flex;justify-content:flex-start;margin:0.6rem 0;
+  gap:0.6rem;align-items:flex-start;animation:slideIn 0.3s ease;
+}}
+.chat-bubble-ai .avatar{{
+  width:36px;height:36px;border-radius:50%;
+  background:linear-gradient(135deg,{ACCENT},{ACCENT2});
+  display:flex;align-items:center;justify-content:center;
+  font-size:1rem;flex-shrink:0;margin-top:2px;
+  box-shadow:0 2px 8px rgba(59,130,246,0.3);
+}}
+.chat-bubble-ai .bubble{{
+  background:{CARD_BG};border:1px solid {BORDER};
+  border-radius:4px 18px 18px 18px;padding:0.8rem 1.1rem;max-width:76%;
+  font-size:0.93rem;line-height:1.6;color:{TEXT};
+  box-shadow:0 2px 8px {SHADOW};
+}}
+.math-box{{
+  background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.25);
+  border-radius:10px;padding:0.8rem 1.1rem;margin-top:0.6rem;
+  font-family:monospace;color:{ACCENT};font-size:0.92rem;
+}}
+
+/* ── Navbar pill (point 4 & fixed color point 3) ── */
+.navbar-pill-wrapper{{
+  background:{NAV_FIXED};
+  border-bottom:1px solid rgba(255,255,255,0.06);
+  box-shadow:0 2px 20px rgba(0,0,0,0.3);
+  padding:0.6rem 2rem;
+  display:flex;align-items:center;
+  justify-content:space-between;
+  position:sticky;top:0;z-index:9999;
+}}
+.nav-brand{{
+  font-size:1.15rem;font-weight:800;
+  background:linear-gradient(135deg,{ACCENT},{ACCENT2});
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  white-space:nowrap;
+}}
+.nav-pill-box{{
+  display:flex;align-items:center;
+  background:rgba(255,255,255,0.07);
+  border:1px solid rgba(255,255,255,0.1);
+  border-radius:50px;padding:4px 6px;gap:2px;
+}}
+.nav-pill-item{{
+  padding:0.35rem 1rem;border-radius:50px;
+  font-size:0.85rem;font-weight:500;
+  color:{NAV_TEXT};background:transparent;
+  transition:all 0.2s;cursor:pointer;white-space:nowrap;
+}}
+.nav-pill-item:hover{{
+  background:rgba(255,255,255,0.12);color:white;
+}}
+.nav-pill-active{{
+  background:linear-gradient(135deg,{ACCENT},{ACCENT2})!important;
+  color:white!important;
+  box-shadow:0 2px 10px rgba(59,130,246,0.4)!important;
+}}
+.nav-pill-btn .stButton>button{{
+  background:transparent!important;color:{NAV_TEXT}!important;
+  border:none!important;font-size:0.85rem!important;font-weight:500!important;
+  padding:0.35rem 1rem!important;border-radius:50px!important;
+  transition:all 0.2s!important;white-space:nowrap!important;
+}}
+.nav-pill-btn .stButton>button:hover{{
+  background:rgba(255,255,255,0.12)!important;color:white!important;
+}}
+.nav-pill-active-btn .stButton>button{{
+  background:linear-gradient(135deg,{ACCENT},{ACCENT2})!important;
+  color:white!important;
+  box-shadow:0 2px 10px rgba(59,130,246,0.4)!important;
+  border:none!important;
+}}
+.nav-github .stButton>button{{
+  background:transparent!important;
+  color:white!important;
+  border:1px solid rgba(255,255,255,0.25)!important;
+  border-radius:50px!important;
+  font-size:0.84rem!important;font-weight:600!important;
+  padding:0.35rem 1rem!important;
+  transition:all 0.2s!important;
+}}
+.nav-github .stButton>button:hover{{
+  background:rgba(255,255,255,0.12)!important;
+  border-color:rgba(255,255,255,0.5)!important;
+  color:white!important;
+}}
+.nav-theme .stButton>button{{
+  background:rgba(255,255,255,0.08)!important;
+  color:{NAV_TEXT}!important;
+  border:1px solid rgba(255,255,255,0.12)!important;
+  border-radius:50px!important;
+  font-size:0.82rem!important;
+  padding:0.32rem 0.8rem!important;
+  transition:all 0.2s!important;
+}}
+.nav-theme .stButton>button:hover{{
+  background:rgba(255,255,255,0.15)!important;
+  color:white!important;
+}}
+
 </style>
 """, unsafe_allow_html=True)
 
-# Logo + nav pill buttons + github in one row
-_logo_col, _pills_col, _gh_col = st.columns([1.8, 3, 1.5])
+# ══════════════════════════════════════════════════════════════════════════════
+# ── NAVBAR (fixed dark color, pill shape)
+# ══════════════════════════════════════════════════════════════════════════════
+page = st.session_state.page
 
-with _logo_col:
-    st.markdown(f"<div class='nav-logo-txt' style='padding:1rem 0.5rem;'>🔬 ResearchAI</div>",
-                unsafe_allow_html=True)
+nb_brand, nb_pills, nb_right = st.columns([1.5, 4, 1.8])
 
-with _pills_col:
-    st.markdown("<div class='nav-pills-box'>", unsafe_allow_html=True)
-    _pb1, _pb2, _pb3, _pb4 = st.columns([1,1,1.3,1])
-    with _pb1:
-        if st.button("🏠 Home", key="nav_home"):
-            st.session_state.page = "home"
-            st.session_state.current_report = None
-            st.rerun()
-    with _pb2:
-        if st.button("🔍 Research", key="nav_research"):
-            st.session_state.page = "research"
-            st.session_state.current_report = None
-            st.rerun()
-    with _pb3:
-        if st.button("❓ How it Works", key="nav_how"):
-            st.session_state.page = "how"
-            st.session_state.current_report = None
-            st.rerun()
-    with _pb4:
-        if st.button(f"{T_ICON} {'Dark' if not dark else 'Light'}", key="nav_theme"):
+with nb_brand:
+    st.markdown(f"""
+    <div style='background:{NAV_FIXED};padding:0.75rem 1rem 0.75rem 2rem;
+                border-bottom:1px solid rgba(255,255,255,0.06);
+                box-shadow:0 2px 20px rgba(0,0,0,0.3);
+                margin:-1rem -1rem 0 -1rem;height:60px;
+                display:flex;align-items:center;'>
+      <span class='nav-brand'>🔬 ResearchAI</span>
+    </div>""", unsafe_allow_html=True)
+
+with nb_pills:
+    st.markdown(f"""
+    <div style='background:{NAV_FIXED};padding:0 0.5rem;
+                border-bottom:1px solid rgba(255,255,255,0.06);
+                margin:-1rem -0.5rem 0 -0.5rem;height:60px;
+                display:flex;align-items:center;justify-content:center;'>
+      <div class='nav-pill-box'>
+    """, unsafe_allow_html=True)
+
+    p1,p2,p3,p4 = st.columns([1,1,1.2,1])
+    pages_map = {
+        "home":     ("🏠 Home",     p1),
+        "chat":     ("💬 Chat AI",  p2),
+        "research": ("🔍 Research", p3),
+        "how":      ("❓ How it Works", p4),
+    }
+    for pg_key,(label,col) in pages_map.items():
+        with col:
+            is_active = page == pg_key
+            css_class = "nav-pill-active-btn" if is_active else "nav-pill-btn"
+            st.markdown(f"<div class='{css_class}'>", unsafe_allow_html=True)
+            if st.button(label, key=f"nav_{pg_key}"):
+                st.session_state.page = pg_key
+                st.session_state.current_report = None
+                st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    st.markdown("</div></div>", unsafe_allow_html=True)
+
+with nb_right:
+    st.markdown(f"""
+    <div style='background:{NAV_FIXED};padding:0 2rem 0 0.5rem;
+                border-bottom:1px solid rgba(255,255,255,0.06);
+                margin:-1rem -1rem 0 -0.5rem;height:60px;
+                display:flex;align-items:center;justify-content:flex-end;
+                gap:0.5rem;box-shadow:0 2px 20px rgba(0,0,0,0.3);'>
+    """, unsafe_allow_html=True)
+
+    rc1,rc2 = st.columns([1,1])
+    with rc1:
+        st.markdown("<div class='nav-theme'>", unsafe_allow_html=True)
+        if st.button("🌙" if not dark else "☀️", key="nav_theme"):
             st.session_state.dark_mode = not dark
             st.rerun()
+        st.markdown("</div>", unsafe_allow_html=True)
+    with rc2:
+        st.markdown("<div class='nav-github'>", unsafe_allow_html=True)
+        if st.button("GitHub →", key="nav_github"):
+            st.markdown('<script>window.open("https://github.com/nevedhya03-dotcom","_blank")</script>',
+                        unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
     st.markdown("</div>", unsafe_allow_html=True)
 
-with _gh_col:
-    st.markdown(
-        f"""<div style='display:flex;justify-content:flex-end;align-items:center;padding:0.6rem 0.5rem;'>
-        <a href='https://github.com/nevedhya03-dotcom' target='_blank' class='gh-link-btn'>
-            GitHub &rarr;
-        </a></div>""",
-        unsafe_allow_html=True)
-
-# ── Content wrapper ────────────────────────────────────────────────────────────
-st.markdown(f"<div style='padding:0 2rem;'>", unsafe_allow_html=True)
+# Content wrapper
+st.markdown(f"<div style='padding:0 2.5rem 3rem 2.5rem;'>", unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# HOME PAGE
+# ── HOME PAGE (completely redesigned)
 # ══════════════════════════════════════════════════════════════════════════════
-if st.session_state.page == "home" and not st.session_state.current_report:
-
+if page == "home":
+    # Hero
     st.markdown(f"""
-    <div style='text-align:center; padding:2.5rem 0 1.5rem 0;'>
-        <div style='display:inline-block; background:rgba(37,99,235,0.1);
-                    color:{ACCENT}; font-size:0.82rem; font-weight:600;
-                    padding:0.3rem 1rem; border-radius:20px; margin-bottom:1rem;
-                    border:1px solid rgba(37,99,235,0.2);'>
-            🚀 Powered by Groq LLaMA3 + Tavily Search API
-        </div>
-        <h1 style='font-size:2.8rem; font-weight:800; color:{TEXT};
-                   line-height:1.22; margin-bottom:1rem;'>
-            Write Better Reports with
-            <span style='color:{ACCENT};'> ResearchAI</span>
-        </h1>
-        <p style='color:{SUBTEXT}; font-size:1.05rem;
-                  max-width:560px; margin:0 auto; line-height:1.7;'>
-            Enter any topic and our AI agent will search the internet,
-            analyze multiple sources, and write a professional
-            research report — <b style='color:{TEXT};'>instantly.</b>
-        </p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown(f"""
-    <div class="stat-grid">
-        <div class="stat-card">
-            <div class="stat-num">30s</div>
-            <div class="stat-label">Average research time</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-num">5+</div>
-            <div class="stat-label">Web sources analyzed</div>
-        </div>
-        <div class="stat-card">
-            <div class="stat-num">100%</div>
-            <div class="stat-label">Free to use</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    c1,c2,c3 = st.columns([0.8,2.5,0.8])
-    with c2:
-        topic = st.text_input("",
-            placeholder="✏️  e.g. Latest trends in Generative AI 2026",
-            label_visibility="collapsed", key="search_input")
-        search_btn = st.button("🔍  Start Research",
-                               type="primary", key="search_btn")
-
-    st.markdown(f"""
-    <div class="feat-grid">
-        <div class="feat-card">
-            <div class="feat-icon">⚡</div>
-            <div class="feat-title">Time-Saving
-                <span class="badge-new">FAST</span></div>
-            <div class="feat-desc">
-                Full research reports in under 30 seconds</div>
-        </div>
-        <div class="feat-card">
-            <div class="feat-icon">🎯</div>
-            <div class="feat-title">High Accuracy</div>
-            <div class="feat-desc">
-                Real-time web search via Tavily API</div>
-        </div>
-        <div class="feat-card">
-            <div class="feat-icon">📄</div>
-            <div class="feat-title">PDF Export
-                <span class="badge-new">NEW</span></div>
-            <div class="feat-desc">
-                Download professional PDF reports instantly</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    if search_btn and topic:
-        with st.spinner("🤖 AI Agent is researching... ⏳"):
-            try:
-                report, steps = run_research(topic)
-                st.session_state.history.append({
-                    "topic": topic, "report": report,
-                    "steps": steps,
-                    "time": datetime.now().strftime("%b %d, %H:%M")
-                })
-                st.session_state.current_report = {
-                    "topic": topic, "report": report, "steps": steps
-                }
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Error: {str(e)}")
-    elif search_btn:
-        st.warning("⚠️ Please enter a research topic!")
-
-    # ── AI Info Section ──────────────────────────────────────────────────────
-    st.markdown(f"""
-    <div style='margin-top:3.5rem;'>
-      <div style='text-align:center;margin-bottom:1.8rem;'>
-        <h2 style='font-size:1.75rem;font-weight:800;color:{TEXT};'>About AI-Powered Research</h2>
-        <p style='color:{SUBTEXT};font-size:0.95rem;max-width:560px;margin:0.5rem auto;'>
-          ResearchAI combines state-of-the-art language models with real-time web search
-          to deliver accurate, comprehensive reports in seconds.
-        </p>
+    <div class='fade-in-up' style='text-align:center;padding:3.5rem 0 2rem 0;'>
+      <div style='display:inline-flex;align-items:center;gap:0.5rem;
+                  background:rgba(59,130,246,0.1);border:1px solid rgba(59,130,246,0.25);
+                  border-radius:50px;padding:0.35rem 1.2rem;margin-bottom:1.5rem;
+                  animation:pulse 3s ease infinite;'>
+        <span style='font-size:0.8rem;font-weight:700;color:{ACCENT};
+                     letter-spacing:0.05em;text-transform:uppercase;'>
+          🚀 AI-Powered · Free · Instant
+        </span>
       </div>
-      <div style='display:grid;grid-template-columns:repeat(2,1fr);gap:1.2rem;margin-bottom:2rem;'>
-        <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:14px;padding:1.5rem;'>
-          <div style='font-size:1.5rem;margin-bottom:0.5rem;'>🧠</div>
-          <div style='font-weight:700;color:{TEXT};margin-bottom:0.4rem;'>Large Language Models</div>
-          <div style='font-size:0.85rem;color:{SUBTEXT};line-height:1.6;'>
-            Powered by Groq's ultra-fast inference running Meta's LLaMA 3 model —
-            capable of synthesizing complex information into coherent, structured reports.
-          </div>
-        </div>
-        <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:14px;padding:1.5rem;'>
-          <div style='font-size:1.5rem;margin-bottom:0.5rem;'>🌐</div>
-          <div style='font-weight:700;color:{TEXT};margin-bottom:0.4rem;'>Real-Time Web Search</div>
-          <div style='font-size:0.85rem;color:{SUBTEXT};line-height:1.6;'>
-            Tavily Search API fetches live, relevant sources from the web — ensuring
-            your reports reflect the latest available information, not outdated training data.
-          </div>
-        </div>
-        <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:14px;padding:1.5rem;'>
-          <div style='font-size:1.5rem;margin-bottom:0.5rem;'>🔗</div>
-          <div style='font-weight:700;color:{TEXT};margin-bottom:0.4rem;'>Agentic Workflow</div>
-          <div style='font-size:0.85rem;color:{SUBTEXT};line-height:1.6;'>
-            LangGraph orchestrates multi-step agent reasoning — the AI decides what to
-            search, how to interpret results, and structures the output intelligently.
-          </div>
-        </div>
-        <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:14px;padding:1.5rem;'>
-          <div style='font-size:1.5rem;margin-bottom:0.5rem;'>📊</div>
-          <div style='font-weight:700;color:{TEXT};margin-bottom:0.4rem;'>Structured Reports</div>
-          <div style='font-size:0.85rem;color:{SUBTEXT};line-height:1.6;'>
-            Every report is formatted with sections, summaries, and key takeaways —
-            and can be exported as a professional PDF with one click.
-          </div>
-        </div>
-      </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ── Pipeline Flowchart (SVG) ─────────────────────────────────────────────
-    arrow_col = ACCENT
-    box_bg = CARD_BG
-    box_border = BORDER
-    txt_c = TEXT
-    sub_c = SUBTEXT
-    st.markdown(f"""
-    <div style='text-align:center;margin-bottom:1rem;'>
-      <div style='font-weight:700;font-size:1.1rem;color:{TEXT};margin-bottom:1rem;'>⚙️ How the Agent Pipeline Works</div>
-      <svg viewBox='0 0 900 140' xmlns='http://www.w3.org/2000/svg'
-           style='width:100%;max-width:900px;height:auto;overflow:visible;'>
-        <!-- Boxes -->
-        <rect x='20' y='35' width='140' height='60' rx='12' fill='{box_bg}' stroke='{arrow_col}' stroke-width='1.5'/>
-        <text x='90' y='61' text-anchor='middle' fill='{txt_c}' font-size='13' font-weight='700'>📝 User Topic</text>
-        <text x='90' y='80' text-anchor='middle' fill='{sub_c}' font-size='10'>Enter a subject</text>
-        <!-- Arrow 1 -->
-        <line x1='160' y1='65' x2='196' y2='65' stroke='{arrow_col}' stroke-width='2' marker-end='url(#arr)'/>
-        <!-- Box 2 -->
-        <rect x='196' y='35' width='140' height='60' rx='12' fill='{box_bg}' stroke='{arrow_col}' stroke-width='1.5'/>
-        <text x='266' y='61' text-anchor='middle' fill='{txt_c}' font-size='13' font-weight='700'>🔍 Web Search</text>
-        <text x='266' y='80' text-anchor='middle' fill='{sub_c}' font-size='10'>Tavily API</text>
-        <!-- Arrow 2 -->
-        <line x1='336' y1='65' x2='372' y2='65' stroke='{arrow_col}' stroke-width='2' marker-end='url(#arr)'/>
-        <!-- Box 3 -->
-        <rect x='372' y='35' width='160' height='60' rx='12' fill='{box_bg}' stroke='{arrow_col}' stroke-width='1.5'/>
-        <text x='452' y='61' text-anchor='middle' fill='{txt_c}' font-size='13' font-weight='700'>🧠 LLM Analysis</text>
-        <text x='452' y='80' text-anchor='middle' fill='{sub_c}' font-size='10'>Groq LLaMA3</text>
-        <!-- Arrow 3 -->
-        <line x1='532' y1='65' x2='568' y2='65' stroke='{arrow_col}' stroke-width='2' marker-end='url(#arr)'/>
-        <!-- Box 4 -->
-        <rect x='568' y='35' width='155' height='60' rx='12' fill='{box_bg}' stroke='{arrow_col}' stroke-width='1.5'/>
-        <text x='645' y='61' text-anchor='middle' fill='{txt_c}' font-size='13' font-weight='700'>📄 Report Draft</text>
-        <text x='645' y='80' text-anchor='middle' fill='{sub_c}' font-size='10'>Structured output</text>
-        <!-- Arrow 4 -->
-        <line x1='723' y1='65' x2='756' y2='65' stroke='{arrow_col}' stroke-width='2' marker-end='url(#arr)'/>
-        <!-- Box 5 -->
-        <rect x='756' y='35' width='128' height='60' rx='12' fill='{arrow_col}'/>
-        <text x='820' y='61' text-anchor='middle' fill='white' font-size='13' font-weight='700'>⬇️ PDF Export</text>
-        <text x='820' y='80' text-anchor='middle' fill='rgba(255,255,255,0.75)' font-size='10'>Download ready</text>
-        <!-- Arrowhead marker -->
-        <defs>
-          <marker id='arr' markerWidth='8' markerHeight='8' refX='6' refY='3' orient='auto'>
-            <path d='M0,0 L0,6 L8,3 z' fill='{arrow_col}'/>
-          </marker>
-        </defs>
-      </svg>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ── CTA to Research page ─────────────────────────────────────────────────
-    st.markdown(f"""
-    <div style='text-align:center;margin:2rem 0 1rem 0;'>
-      <p style='color:{SUBTEXT};font-size:0.92rem;'>Ready to generate your first report?</p>
-    </div>
-    """, unsafe_allow_html=True)
-    _cta1, _cta2, _cta3 = st.columns([1,1,1])
-    with _cta2:
-        if st.button("🔍  Go to Research Page →", type="primary", key="cta_research"):
-            st.session_state.page = "research"
-            st.rerun()
-
-# ══════════════════════════════════════════════════════════════════════════════
-# RESEARCH PAGE  (Dual-Mode: Chat AI + Deep Research)
-# ══════════════════════════════════════════════════════════════════════════════
-elif st.session_state.page == "research" and not st.session_state.current_report:
-
-    # Mermaid.js injection (loads once per page render)
-    st.markdown("""
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-    <script>
-      document.addEventListener('DOMContentLoaded', function() {
-        if (window.mermaid) { mermaid.initialize({startOnLoad:true, theme:'dark'}); }
-      });
-      // Also try to init after a short delay for Streamlit dynamic rendering
-      setTimeout(function() {
-        if (window.mermaid) { mermaid.init(undefined, document.querySelectorAll('.mermaid')); }
-      }, 800);
-    </script>
-    """, unsafe_allow_html=True)
-
-    # ── Page header ──────────────────────────────────────────────────────────
-    st.markdown(f"""
-    <div style='text-align:center;padding:2rem 0 0.8rem 0;'>
-      <h1 style='font-size:2.2rem;font-weight:800;color:{TEXT};line-height:1.25;margin-bottom:0.4rem;'>
-        🤖 ResearchAI <span style='color:{ACCENT};'>Assistant</span>
+      <h1 style='font-size:3rem;font-weight:800;line-height:1.15;
+                 margin-bottom:1.2rem;color:{TEXT};'>
+        Your Personal
+        <span class='grad-text'> AI Assistant</span><br>
+        for Research &amp; Chat
       </h1>
-      <p style='color:{SUBTEXT};font-size:0.95rem;max-width:520px;margin:0 auto;'>
-        Chat with AI · Solve math · Generate flowcharts · Deep web research
+      <p style='color:{SUBTEXT};font-size:1.1rem;max-width:600px;
+                margin:0 auto;line-height:1.75;'>
+        Powered by <b style='color:{TEXT};'>Groq LLaMA3</b> + 
+        <b style='color:{TEXT};'>Tavily Search</b> + 
+        <b style='color:{TEXT};'>LangGraph Agents</b> —
+        chat with AI, solve math, generate flowcharts,
+        and write deep research reports.
       </p>
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Tab switcher ─────────────────────────────────────────────────────────
+    # Two CTA buttons
+    cta1, cta2, cta3, cta4 = st.columns([1, 1.2, 1.2, 1])
+    with cta2:
+        if st.button("💬 Start Chatting →", type="primary", key="hero_chat"):
+            st.session_state.page = "chat"
+            st.rerun()
+    with cta3:
+        if st.button("🔍 Deep Research →", type="primary", key="hero_research"):
+            st.session_state.page = "research"
+            st.rerun()
+
+    # Stats (4 columns)
     st.markdown(f"""
-    <style>
-    .tab-bar{{display:flex;gap:0.5rem;margin:1rem 0 1.5rem 0;}}
-    .tab-bar .stButton>button{{
-      border-radius:22px!important;font-size:0.9rem!important;
-      font-weight:600!important;padding:0.45rem 1.3rem!important;
-    }}
-    .chat-bubble-user{{
-      display:flex;justify-content:flex-end;margin:0.5rem 0;
-    }}
-    .chat-bubble-user .bubble{{
-      background:{ACCENT};color:white;
-      border-radius:18px 18px 4px 18px;
-      padding:0.75rem 1.1rem;max-width:72%;
-      font-size:0.93rem;line-height:1.55;
-    }}
-    .chat-bubble-ai{{
-      display:flex;justify-content:flex-start;margin:0.5rem 0;
-      gap:0.6rem;align-items:flex-start;
-    }}
-    .chat-bubble-ai .avatar{{
-      width:34px;height:34px;border-radius:50%;
-      background:{ACCENT};display:flex;align-items:center;
-      justify-content:center;font-size:1rem;flex-shrink:0;margin-top:2px;
-    }}
-    .chat-bubble-ai .bubble{{
-      background:{CARD_BG};border:1px solid {BORDER};
-      border-radius:4px 18px 18px 18px;
-      padding:0.75rem 1.1rem;max-width:78%;
-      font-size:0.93rem;line-height:1.6;color:{TEXT};
-    }}
-    .math-box{{
-      background:rgba(37,99,235,0.1);border:1px solid rgba(37,99,235,0.3);
-      border-radius:10px;padding:0.8rem 1.1rem;margin-top:0.6rem;
-      font-family:monospace;color:{ACCENT};font-size:0.92rem;
-    }}
-    .mermaid{{
-      margin-top:0.8rem;
-      background:{CARD_BG}!important;
-      border-radius:12px;padding:1rem;
-    }}
-    </style>
+    <div class='fade-in stat-grid' style='margin-top:2.5rem;'>
+      <div class='stat-card float' style='animation-delay:0s;'>
+        <div class='stat-num'>30s</div>
+        <div class='stat-label'>Average response time</div>
+      </div>
+      <div class='stat-card float' style='animation-delay:0.3s;'>
+        <div class='stat-num'>5+</div>
+        <div class='stat-label'>Live web sources</div>
+      </div>
+      <div class='stat-card float' style='animation-delay:0.6s;'>
+        <div class='stat-num'>∞</div>
+        <div class='stat-label'>Chat turns supported</div>
+      </div>
+      <div class='stat-card float' style='animation-delay:0.9s;'>
+        <div class='stat-num'>100%</div>
+        <div class='stat-label'>Free to use</div>
+      </div>
+    </div>
     """, unsafe_allow_html=True)
 
-    t1, t2, t3 = st.columns([1.2, 1.5, 3])
-    with t1:
-        if st.button("💬 Chat AI",
-                     type="primary" if st.session_state.chat_tab == "chat" else "secondary",
-                     key="tab_chat"):
-            st.session_state.chat_tab = "chat"
-            st.rerun()
-    with t2:
-        if st.button("🔍 Deep Research",
-                     type="primary" if st.session_state.chat_tab == "research" else "secondary",
-                     key="tab_research"):
-            st.session_state.chat_tab = "research"
-            st.rerun()
+    # What can you do section
+    st.markdown(f"""
+    <div style='text-align:center;margin:3rem 0 1.5rem 0;'>
+      <h2 style='font-size:1.8rem;font-weight:800;color:{TEXT};'>
+        Everything in One Place
+      </h2>
+      <p style='color:{SUBTEXT};font-size:0.95rem;max-width:500px;margin:0.5rem auto;'>
+        Two powerful modes. One intelligent platform.
+      </p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    st.markdown("<hr style='border:none;border-top:1px solid " + BORDER + ";margin:0 0 1.2rem 0;'>",
-                unsafe_allow_html=True)
-
-    # ══════════════════════════════════════════════════════════════════════════
-    # TAB 1 — CHAT AI
-    # ══════════════════════════════════════════════════════════════════════════
-    if st.session_state.chat_tab == "chat":
-
-        if not st.session_state.chat_messages:
-            st.markdown(f"""
-            <div style='margin-bottom:1.2rem;'>
-              <div style='color:{SUBTEXT};font-size:0.82rem;font-weight:600;
-                          text-transform:uppercase;letter-spacing:0.05em;
-                          margin-bottom:0.6rem;'>Try asking...</div>
-              <div style='display:flex;flex-wrap:wrap;gap:0.5rem;'>
-                {''.join([
-                    f"<span style='background:{CARD_BG};border:1px solid {BORDER};"
-                    f"border-radius:20px;padding:0.35rem 0.9rem;font-size:0.83rem;"
-                    f"color:{SUBTEXT};'>{p}</span>"
-                    for p in [
-                        "Explain quantum computing simply",
-                        "Solve x² - 5x + 6 = 0",
-                        "Flowchart of how the internet works",
-                        "What is machine learning?",
-                        "Calculate 15% of 3,450",
-                        "Diagram of photosynthesis process",
-                    ]
-                ])}
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        import re
-        import streamlit.components.v1 as components
-
-        for msg in st.session_state.chat_messages:
-            if msg["role"] == "user":
-                st.markdown(f"""
-                <div class='chat-bubble-user'>
-                  <div class='bubble'>{msg['content']}</div>
-                </div>""", unsafe_allow_html=True)
-            else:
-                content = msg["content"]
-                mermaid_pattern = r'```mermaid\s*([\s\S]*?)```'
-                parts = re.split(mermaid_pattern, content)
-
-                for i, part in enumerate(parts):
-                    if i % 2 == 0:
-                        if part.strip():
-                            st.markdown(f"""
-                            <div class='chat-bubble-ai'>
-                              <div class='avatar'>🤖</div>
-                              <div class='bubble'>{part.strip()}</div>
-                            </div>""", unsafe_allow_html=True)
-                    else:
-                        mermaid_theme = "dark" if dark else "default"
-                        clean_mermaid = part.strip().replace('"', "'")
-                        components.html(f"""
-                        <!DOCTYPE html>
-                        <html>
-                        <head>
-                          <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-                          <style>
-                            body {{
-                              background:{'#161b22' if dark else '#ffffff'};
-                              margin:0; padding:1rem;
-                            }}
-                            .mermaid {{ text-align:center; }}
-                            .error-box {{
-                              background:rgba(239,68,68,0.1);
-                              border:1px solid rgba(239,68,68,0.3);
-                              border-radius:10px; padding:1rem;
-                              color:#ef4444; font-size:0.85rem;
-                            }}
-                            .code-box {{
-                              background:{'#21262d' if dark else '#f3f4f6'};
-                              border-radius:8px; padding:0.8rem;
-                              font-family:monospace; font-size:0.8rem;
-                              color:{'#e6edf3' if dark else '#1e293b'};
-                              white-space:pre-wrap; margin-top:0.5rem;
-                            }}
-                          </style>
-                        </head>
-                        <body>
-                          <div id="diagram" class="mermaid">{clean_mermaid}</div>
-                          <div id="fallback" style="display:none;">
-                            <div class="error-box">
-                              ⚠️ Could not render diagram. Raw code:
-                              <div class="code-box">{clean_mermaid}</div>
-                            </div>
-                          </div>
-                          <script>
-                            mermaid.initialize({{
-                              startOnLoad: false,
-                              theme: '{mermaid_theme}',
-                              securityLevel: 'loose'
-                            }});
-                            mermaid.run({{
-                              nodes: [document.getElementById('diagram')]
-                            }}).catch((err) => {{
-                              document.getElementById('diagram').style.display='none';
-                              document.getElementById('fallback').style.display='block';
-                            }});
-                          </script>
-                        </body>
-                        </html>
-                        """, height=380, scrolling=True)
-
-                if "math_result" in msg and msg["math_result"]:
-                    st.markdown(f"""
-                    <div class='chat-bubble-ai'>
-                      <div class='avatar'>🔢</div>
-                      <div class='bubble'>
-                        <div class='math-box'>{msg['math_result']}</div>
-                      </div>
-                    </div>""", unsafe_allow_html=True)
-
-        chat_col1, chat_col2 = st.columns([6, 1])
-        with chat_col1:
-            user_input = st.text_input("Message",
-                placeholder="Ask anything — math, flowcharts, questions...",
-                label_visibility="collapsed", key="chat_input")
-        with chat_col2:
-            send_btn = st.button("Send ➤", type="primary", key="send_btn")
-
-        cl1, cl2 = st.columns([5, 1])
-        with cl2:
-            if st.session_state.chat_messages:
-                if st.button("🗑 Clear", key="clear_chat"):
-                    st.session_state.chat_messages = []
-                    st.rerun()
-
-        if send_btn and user_input:
-            st.session_state.chat_messages.append({
-                "role": "user", "content": user_input
-            })
-            with st.spinner("🤖 Thinking..."):
-                try:
-                    ai_reply = chat_with_ai(
-                        st.session_state.chat_messages)
-                    math_result = ""
-                    math_keywords = ["solve", "calculate", "compute",
-                                     "=", "x^", "x²", "sqrt",
-                                     "integral", "derivative", "%"]
-                    if any(kw in user_input.lower()
-                           for kw in math_keywords):
-                        math_result = solve_math(
-                            user_input.replace("solve","").strip())
-                    st.session_state.chat_messages.append({
-                        "role": "assistant",
-                        "content": ai_reply,
-                        "math_result": math_result
-                    })
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
-        elif send_btn:
-            st.warning("⚠️ Please type a message first!")
+    # Two big mode cards
+    m1, m2 = st.columns(2)
+    with m1:
         st.markdown(f"""
-                    <div style='margin-bottom:1.2rem;'>
-          <div style='font-weight:700;font-size:1rem;color:{TEXT};margin-bottom:0.3rem;'>
-            🔍 AI-Powered Web Research
+        <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:20px;
+                    padding:2rem;box-shadow:0 4px 20px {SHADOW};
+                    border-top:4px solid {ACCENT};transition:all 0.3s;
+                    animation:fadeInUp 0.6s ease;'>
+          <div style='font-size:2.5rem;margin-bottom:1rem;'>💬</div>
+          <div style='font-size:1.2rem;font-weight:800;color:{TEXT};
+                      margin-bottom:0.7rem;'>
+            Chat AI
+            <span class='badge-pill'>New</span>
           </div>
-          <div style='color:{SUBTEXT};font-size:0.88rem;'>
-            Enter a topic — our agent searches 5+ live sources and writes a structured report.
+          <div style='font-size:0.88rem;color:{SUBTEXT};line-height:1.7;
+                      margin-bottom:1.2rem;'>
+            Have a real conversation with AI. Ask anything —
+            general knowledge, science, history, coding.
+            Solve complex math equations step by step.
+            Generate flowcharts and diagrams instantly.
+          </div>
+          <div style='display:flex;flex-wrap:wrap;gap:0.5rem;'>
+            {"".join([
+              f"<span style='background:{HOVER};color:{ACCENT};border:1px solid rgba(59,130,246,0.2);"
+              f"border-radius:20px;padding:0.2rem 0.7rem;font-size:0.78rem;font-weight:600;'>{t}</span>"
+              for t in ["💬 Multi-turn chat","🧮 Math solver","📊 Flowcharts","💡 Any question"]
+            ])}
           </div>
         </div>
         """, unsafe_allow_html=True)
 
-        r1, r2, r3 = st.columns([0.2, 4, 0.2])
-        with r2:
-            res_topic = st.text_input("",
-                placeholder="💡  e.g. Impact of Quantum Computing on Cryptography",
-                label_visibility="collapsed", key="res_input")
-            st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
-            res_btn = st.button("🚀  Generate Research Report", type="primary", key="res_btn")
-
+    with m2:
         st.markdown(f"""
-        <div style='display:grid;grid-template-columns:repeat(3,1fr);gap:0.8rem;margin:1.5rem 0;'>
-          <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:12px;
-                      padding:1rem;text-align:center;'>
-            <div style='font-size:1.5rem;'>⚡</div>
-            <div style='font-weight:700;font-size:0.88rem;color:{TEXT};margin-top:0.3rem;'>~30s</div>
-            <div style='font-size:0.76rem;color:{SUBTEXT};'>Fast inference</div>
+        <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:20px;
+                    padding:2rem;box-shadow:0 4px 20px {SHADOW};
+                    border-top:4px solid {ACCENT2};transition:all 0.3s;
+                    animation:fadeInUp 0.7s ease;'>
+          <div style='font-size:2.5rem;margin-bottom:1rem;'>🔍</div>
+          <div style='font-size:1.2rem;font-weight:800;color:{TEXT};
+                      margin-bottom:0.7rem;'>
+            Deep Research
+            <span class='badge-pill' style='background:linear-gradient(135deg,rgba(139,92,246,0.15),rgba(236,72,153,0.1));
+                         border-color:rgba(139,92,246,0.25);color:{ACCENT2}!important;'>AI Agent</span>
           </div>
-          <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:12px;
-                      padding:1rem;text-align:center;'>
-            <div style='font-size:1.5rem;'>🌐</div>
-            <div style='font-weight:700;font-size:0.88rem;color:{TEXT};margin-top:0.3rem;'>5+ Sources</div>
-            <div style='font-size:0.76rem;color:{SUBTEXT};'>Real-time web</div>
+          <div style='font-size:0.88rem;color:{SUBTEXT};line-height:1.7;
+                      margin-bottom:1.2rem;'>
+            Our AI agent searches 5+ live web sources,
+            analyzes the content, and writes a structured
+            professional report — with PDF export.
+            Powered by LangGraph agentic workflow.
           </div>
-          <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:12px;
-                      padding:1rem;text-align:center;'>
-            <div style='font-size:1.5rem;'>📄</div>
-            <div style='font-weight:700;font-size:0.88rem;color:{TEXT};margin-top:0.3rem;'>PDF Export</div>
-            <div style='font-size:0.76rem;color:{SUBTEXT};'>Download ready</div>
+          <div style='display:flex;flex-wrap:wrap;gap:0.5rem;'>
+            {"".join([
+              f"<span style='background:rgba(139,92,246,0.1);color:{ACCENT2};border:1px solid rgba(139,92,246,0.2);"
+              f"border-radius:20px;padding:0.2rem 0.7rem;font-size:0.78rem;font-weight:600;'>{t}</span>"
+              for t in ["🌐 Live web search","📄 PDF export","🤖 AI Agent","⚡ 30 seconds"]
+            ])}
           </div>
         </div>
         """, unsafe_allow_html=True)
 
-        if st.session_state.history:
-            st.markdown(f"<div style='font-weight:700;color:{TEXT};font-size:0.9rem;"
-                        f"margin-bottom:0.5rem;'>📂 Recent Reports</div>",
-                        unsafe_allow_html=True)
-            for item in reversed(st.session_state.history[-4:]):
-                st.markdown(f"""
-                <div class='hist-item'>
-                  <div class='hist-title'>📄 {item['topic']}</div>
-                  <div class='hist-date'>{item['time']}</div>
-                </div>""", unsafe_allow_html=True)
+    # Features grid (6 features)
+    st.markdown(f"""
+    <div style='text-align:center;margin:3rem 0 1.5rem 0;'>
+      <h2 style='font-size:1.8rem;font-weight:800;color:{TEXT};'>
+        Why ResearchAI?
+      </h2>
+    </div>
+    <div class='feat-grid'>
+      <div class='feat-card'>
+        <div class='feat-icon'>⚡</div>
+        <div class='feat-title'>Lightning Fast</div>
+        <div class='feat-desc'>
+          Groq's ultra-fast inference gives you answers in under 30 seconds
+        </div>
+      </div>
+      <div class='feat-card'>
+        <div class='feat-icon'>🌐</div>
+        <div class='feat-title'>Real-Time Data</div>
+        <div class='feat-desc'>
+          Live web search via Tavily API — always current, never outdated
+        </div>
+      </div>
+      <div class='feat-card'>
+        <div class='feat-icon'>🧮</div>
+        <div class='feat-title'>Math Solver</div>
+        <div class='feat-desc'>
+          Solve equations, calculus, algebra with step-by-step solutions
+        </div>
+      </div>
+      <div class='feat-card'>
+        <div class='feat-icon'>📊</div>
+        <div class='feat-title'>Flowcharts</div>
+        <div class='feat-desc'>
+          Generate beautiful Mermaid diagrams just by describing them
+        </div>
+      </div>
+      <div class='feat-card'>
+        <div class='feat-icon'>📄</div>
+        <div class='feat-title'>PDF Export</div>
+        <div class='feat-desc'>
+          Download professional research reports as PDF with one click
+        </div>
+      </div>
+      <div class='feat-card'>
+        <div class='feat-icon'>🆓</div>
+        <div class='feat-title'>100% Free</div>
+        <div class='feat-desc'>
+          No subscription, no credit card — completely free to use
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
-        if res_btn and res_topic:
-            with st.spinner("🤖 AI Agent is researching... ⏳"):
-                try:
-                    report, steps = run_research(res_topic)
-                    st.session_state.history.append({
-                        "topic": res_topic, "report": report,
-                        "steps": steps,
-                        "time": datetime.now().strftime("%b %d, %H:%M")
-                    })
-                    st.session_state.current_report = {
-                        "topic": res_topic, "report": report, "steps": steps
-                    }
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
-        elif res_btn:
-            st.warning("⚠️ Please enter a research topic!")
+    # Pipeline SVG
+    st.markdown(f"""
+    <div style='margin:3rem 0 1rem 0;text-align:center;'>
+      <h2 style='font-size:1.6rem;font-weight:800;color:{TEXT};margin-bottom:1.5rem;'>
+        ⚙️ How the AI Agent Pipeline Works
+      </h2>
+      <svg viewBox='0 0 920 130' xmlns='http://www.w3.org/2000/svg'
+           style='width:100%;max-width:920px;height:auto;'>
+        <defs>
+          <linearGradient id='g1' x1='0%' y1='0%' x2='100%' y2='0%'>
+            <stop offset='0%' style='stop-color:{ACCENT};stop-opacity:1'/>
+            <stop offset='100%' style='stop-color:{ACCENT2};stop-opacity:1'/>
+          </linearGradient>
+          <marker id='arr' markerWidth='8' markerHeight='8' refX='6' refY='3' orient='auto'>
+            <path d='M0,0 L0,6 L8,3 z' fill='{ACCENT}'/>
+          </marker>
+        </defs>
+        <rect x='10' y='30' width='145' height='65' rx='14' fill='{CARD_BG}' stroke='{ACCENT}' stroke-width='1.5'/>
+        <text x='82' y='58' text-anchor='middle' fill='{TEXT}' font-size='12' font-weight='700' font-family='Inter'>📝 User Topic</text>
+        <text x='82' y='76' text-anchor='middle' fill='{SUBTEXT}' font-size='10' font-family='Inter'>Enter a subject</text>
+        <line x1='155' y1='62' x2='188' y2='62' stroke='{ACCENT}' stroke-width='2' marker-end='url(#arr)'/>
+        <rect x='188' y='30' width='145' height='65' rx='14' fill='{CARD_BG}' stroke='{ACCENT}' stroke-width='1.5'/>
+        <text x='260' y='58' text-anchor='middle' fill='{TEXT}' font-size='12' font-weight='700' font-family='Inter'>🔍 Web Search</text>
+        <text x='260' y='76' text-anchor='middle' fill='{SUBTEXT}' font-size='10' font-family='Inter'>Tavily API</text>
+        <line x1='333' y1='62' x2='366' y2='62' stroke='{ACCENT}' stroke-width='2' marker-end='url(#arr)'/>
+        <rect x='366' y='30' width='165' height='65' rx='14' fill='{CARD_BG}' stroke='{ACCENT}' stroke-width='1.5'/>
+        <text x='448' y='58' text-anchor='middle' fill='{TEXT}' font-size='12' font-weight='700' font-family='Inter'>🧠 LLM Analysis</text>
+        <text x='448' y='76' text-anchor='middle' fill='{SUBTEXT}' font-size='10' font-family='Inter'>Groq LLaMA3</text>
+        <line x1='531' y1='62' x2='564' y2='62' stroke='{ACCENT}' stroke-width='2' marker-end='url(#arr)'/>
+        <rect x='564' y='30' width='160' height='65' rx='14' fill='{CARD_BG}' stroke='{ACCENT}' stroke-width='1.5'/>
+        <text x='644' y='58' text-anchor='middle' fill='{TEXT}' font-size='12' font-weight='700' font-family='Inter'>📝 Report Draft</text>
+        <text x='644' y='76' text-anchor='middle' fill='{SUBTEXT}' font-size='10' font-family='Inter'>Structured output</text>
+        <line x1='724' y1='62' x2='757' y2='62' stroke='{ACCENT}' stroke-width='2' marker-end='url(#arr)'/>
+        <rect x='757' y='30' width='150' height='65' rx='14' fill='url(#g1)'/>
+        <text x='832' y='58' text-anchor='middle' fill='white' font-size='12' font-weight='700' font-family='Inter'>⬇️ PDF Export</text>
+        <text x='832' y='76' text-anchor='middle' fill='rgba(255,255,255,0.8)' font-size='10' font-family='Inter'>Download ready</text>
+      </svg>
+    </div>
+    """, unsafe_allow_html=True)
 
 # ══════════════════════════════════════════════════════════════════════════════
-# HOW IT WORKS PAGE
+# ── CHAT AI PAGE
 # ══════════════════════════════════════════════════════════════════════════════
-elif st.session_state.page == "how" and not st.session_state.current_report:
+elif page == "chat" and not st.session_state.current_report:
 
     st.markdown(f"""
-    <div style='text-align:center; padding:2.5rem 0 1.5rem 0;'>
-        <h1 style='font-size:2.2rem; font-weight:800; color:{TEXT};'>
-            How ResearchAI Works</h1>
-        <p style='color:{SUBTEXT}; font-size:1rem;
-                  max-width:500px; margin:0.8rem auto;'>
-            From topic to professional report in 4 simple steps</p>
+    <div class='fade-in-up' style='text-align:center;padding:2rem 0 1.5rem 0;'>
+      <h1 style='font-size:2.2rem;font-weight:800;color:{TEXT};margin-bottom:0.4rem;'>
+        💬 Chat <span class='grad-text'>AI</span>
+      </h1>
+      <p style='color:{SUBTEXT};font-size:0.95rem;max-width:520px;margin:0 auto;'>
+        Ask anything · Solve math · Generate flowcharts · Get explanations
+      </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if not st.session_state.chat_messages:
+        st.markdown(f"""
+        <div style='margin-bottom:1.5rem;animation:fadeIn 0.5s ease;'>
+          <div style='color:{SUBTEXT};font-size:0.78rem;font-weight:700;
+                      text-transform:uppercase;letter-spacing:0.06em;
+                      margin-bottom:0.7rem;'>✨ Try asking...</div>
+          <div style='display:flex;flex-wrap:wrap;gap:0.5rem;'>
+            {"".join([
+              f"<span style='background:{CARD_BG};border:1px solid {BORDER};"
+              f"border-radius:20px;padding:0.4rem 1rem;font-size:0.83rem;"
+              f"color:{SUBTEXT};cursor:pointer;transition:all 0.2s;'>{p}</span>"
+              for p in [
+                  "Explain quantum computing simply",
+                  "Solve x² - 5x + 6 = 0",
+                  "Flowchart of how the internet works",
+                  "What is machine learning?",
+                  "Calculate 15% of 3,450",
+                  "Diagram of photosynthesis process",
+              ]
+            ])}
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    for msg in st.session_state.chat_messages:
+        if msg["role"] == "user":
+            st.markdown(f"""
+            <div class='chat-bubble-user'>
+              <div class='bubble'>{msg['content']}</div>
+            </div>""", unsafe_allow_html=True)
+        else:
+            content = msg["content"]
+            mermaid_pattern = r'```mermaid\s*([\s\S]*?)```'
+            parts = re.split(mermaid_pattern, content)
+
+            for i, part in enumerate(parts):
+                if i % 2 == 0:
+                    if part.strip():
+                        st.markdown(f"""
+                        <div class='chat-bubble-ai'>
+                          <div class='avatar'>🤖</div>
+                          <div class='bubble'>{part.strip()}</div>
+                        </div>""", unsafe_allow_html=True)
+                else:
+                    mermaid_theme = "dark" if dark else "default"
+                    clean_mermaid = part.strip().replace('"', "'")
+                    components.html(f"""
+                    <!DOCTYPE html><html>
+                    <head>
+                      <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+                      <style>
+                        body{{background:{'#161b22' if dark else '#f8fafc'};
+                             margin:0;padding:1rem;font-family:Inter,sans-serif;}}
+                        .mermaid{{text-align:center;}}
+                        .err{{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);
+                              border-radius:10px;padding:1rem;color:#ef4444;font-size:0.85rem;}}
+                        pre{{background:{'#21262d' if dark else '#f3f4f6'};border-radius:8px;
+                             padding:0.8rem;font-size:0.8rem;
+                             color:{'#e6edf3' if dark else '#1e293b'};
+                             white-space:pre-wrap;margin-top:0.5rem;}}
+                      </style>
+                    </head>
+                    <body>
+                      <div id="d" class="mermaid">{clean_mermaid}</div>
+                      <div id="f" style="display:none;">
+                        <div class="err">⚠️ Diagram syntax error. Raw code:<pre>{clean_mermaid}</pre></div>
+                      </div>
+                      <script>
+                        mermaid.initialize({{startOnLoad:false,theme:'{mermaid_theme}',securityLevel:'loose'}});
+                        mermaid.run({{nodes:[document.getElementById('d')]}}).catch(()=>{{
+                          document.getElementById('d').style.display='none';
+                          document.getElementById('f').style.display='block';
+                        }});
+                      </script>
+                    </body></html>
+                    """, height=360, scrolling=True)
+
+            if "math_result" in msg and msg["math_result"]:
+                st.markdown(f"""
+                <div class='chat-bubble-ai'>
+                  <div class='avatar'>🔢</div>
+                  <div class='bubble'>
+                    <div class='math-box'>{msg['math_result']}</div>
+                  </div>
+                </div>""", unsafe_allow_html=True)
+
+    # Input
+    ci1, ci2 = st.columns([6, 1])
+    with ci1:
+        user_input = st.text_input("Message",
+            placeholder="Ask anything — math, flowcharts, questions...",
+            label_visibility="collapsed", key="chat_input")
+    with ci2:
+        send_btn = st.button("Send ➤", type="primary", key="send_btn")
+
+    cl1, cl2 = st.columns([5, 1])
+    with cl2:
+        if st.session_state.chat_messages:
+            if st.button("🗑 Clear", key="clear_chat"):
+                st.session_state.chat_messages = []
+                st.rerun()
+
+    if send_btn and user_input:
+        st.session_state.chat_messages.append({"role":"user","content":user_input})
+        with st.spinner("🤖 Thinking..."):
+            try:
+                ai_reply = chat_with_ai(st.session_state.chat_messages)
+                math_result = ""
+                if any(kw in user_input.lower() for kw in
+                       ["solve","calculate","compute","=","x^","x²",
+                        "sqrt","integral","derivative","%"]):
+                    math_result = solve_math(user_input.replace("solve","").strip())
+                st.session_state.chat_messages.append({
+                    "role":"assistant","content":ai_reply,"math_result":math_result
+                })
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error: {str(e)}")
+    elif send_btn:
+        st.warning("⚠️ Please type a message first!")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ── RESEARCH PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "research" and not st.session_state.current_report:
+
+    st.markdown(f"""
+    <div class='fade-in-up' style='text-align:center;padding:2rem 0 1.5rem 0;'>
+      <h1 style='font-size:2.2rem;font-weight:800;color:{TEXT};margin-bottom:0.4rem;'>
+        🔍 Deep <span class='grad-text'>Research</span>
+      </h1>
+      <p style='color:{SUBTEXT};font-size:0.95rem;max-width:500px;margin:0 auto;'>
+        AI agent searches 5+ live sources and writes a professional report
+      </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    r1,r2,r3 = st.columns([0.3,4,0.3])
+    with r2:
+        res_topic = st.text_input("Research",
+            placeholder="💡  e.g. Impact of Quantum Computing on Cryptography",
+            label_visibility="collapsed", key="res_input")
+        st.markdown("<div style='height:0.4rem'></div>", unsafe_allow_html=True)
+        res_btn = st.button("🚀  Generate Research Report",
+                            type="primary", key="res_btn")
+
+    st.markdown(f"""
+    <div style='display:grid;grid-template-columns:repeat(3,1fr);
+                gap:1rem;margin:1.5rem 0;'>
+      <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:14px;
+                  padding:1.2rem;text-align:center;box-shadow:0 2px 8px {SHADOW};'>
+        <div style='font-size:1.6rem;'>⚡</div>
+        <div style='font-weight:700;font-size:0.9rem;color:{TEXT};margin-top:0.3rem;'>~30 seconds</div>
+        <div style='font-size:0.78rem;color:{SUBTEXT};'>Groq fast inference</div>
+      </div>
+      <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:14px;
+                  padding:1.2rem;text-align:center;box-shadow:0 2px 8px {SHADOW};'>
+        <div style='font-size:1.6rem;'>🌐</div>
+        <div style='font-weight:700;font-size:0.9rem;color:{TEXT};margin-top:0.3rem;'>5+ Sources</div>
+        <div style='font-size:0.78rem;color:{SUBTEXT};'>Real-time web search</div>
+      </div>
+      <div style='background:{CARD_BG};border:1px solid {BORDER};border-radius:14px;
+                  padding:1.2rem;text-align:center;box-shadow:0 2px 8px {SHADOW};'>
+        <div style='font-size:1.6rem;'>📄</div>
+        <div style='font-weight:700;font-size:0.9rem;color:{TEXT};margin-top:0.3rem;'>PDF Export</div>
+        <div style='font-size:0.78rem;color:{SUBTEXT};'>Professional report</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if st.session_state.history:
+        st.markdown(f"""
+        <div style='font-weight:700;color:{TEXT};font-size:0.9rem;
+                    margin-bottom:0.6rem;'>📂 Recent Reports</div>
+        """, unsafe_allow_html=True)
+        for item in reversed(st.session_state.history[-4:]):
+            st.markdown(f"""
+            <div class='hist-item'>
+              <div class='hist-title'>📄 {item['topic']}</div>
+              <div class='hist-date'>{item['time']}</div>
+            </div>""", unsafe_allow_html=True)
+
+    if res_btn and res_topic:
+        with st.spinner("🤖 AI Agent is researching... ⏳"):
+            try:
+                report, steps = run_research(res_topic)
+                st.session_state.history.append({
+                    "topic":res_topic,"report":report,
+                    "steps":steps,
+                    "time":datetime.now().strftime("%b %d, %H:%M")
+                })
+                st.session_state.current_report = {
+                    "topic":res_topic,"report":report,"steps":steps
+                }
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Error: {str(e)}")
+    elif res_btn:
+        st.warning("⚠️ Please enter a research topic!")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ── HOW IT WORKS PAGE
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "how" and not st.session_state.current_report:
+
+    st.markdown(f"""
+    <div class='fade-in-up' style='text-align:center;padding:2.5rem 0 1.5rem 0;'>
+      <h1 style='font-size:2.2rem;font-weight:800;color:{TEXT};'>How ResearchAI Works</h1>
+      <p style='color:{SUBTEXT};font-size:1rem;max-width:500px;margin:0.8rem auto;'>
+        From topic to professional report in 4 simple steps
+      </p>
     </div>
     """, unsafe_allow_html=True)
 
     s1,s2,s3,s4 = st.columns(4)
     for col,num,icon,title,desc in [
-        (s1,"1","📝","Enter Topic","Type any research topic you want to learn about"),
+        (s1,"1","📝","Enter Topic","Type any research topic or question"),
         (s2,"2","🔍","AI Searches","Agent searches internet using Tavily API"),
-        (s3,"3","🧠","AI Analyzes","Groq LLaMA3 synthesizes all search results"),
-        (s4,"4","📄","Report Ready","Structured professional report in seconds"),
+        (s3,"3","🧠","AI Analyzes","Groq LLaMA3 synthesizes all results"),
+        (s4,"4","📄","Report Ready","Professional report in seconds with PDF export"),
     ]:
         with col:
             st.markdown(f"""
-            <div class="step-card">
-                <div class="step-num">{num}</div>
-                <div style='font-size:1.9rem;margin-bottom:0.5rem;'>{icon}</div>
-                <div class="step-title">{title}</div>
-                <div class="step-desc">{desc}</div>
+            <div class='step-card'>
+              <div class='step-num'>{num}</div>
+              <div style='font-size:1.9rem;margin-bottom:0.5rem;'>{icon}</div>
+              <div class='step-title'>{title}</div>
+              <div class='step-desc'>{desc}</div>
             </div>""", unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown(f"""
-    <div class="card">
-        <div style='font-size:1.1rem;font-weight:700;color:{TEXT};
-                    margin-bottom:1.2rem;'>⚡ Tech Stack</div>
-        <div style='display:grid;grid-template-columns:repeat(3,1fr);gap:0.8rem;'>
-        {"".join([
-            f"<div style='padding:0.9rem;background:{CARD2};border-radius:10px;"
-            f"border:1px solid {BORDER};'>"
-            f"<div style='font-weight:700;color:{ACCENT};margin-bottom:0.3rem;"
-            f"font-size:0.95rem;'>{ic} {nm}</div>"
-            f"<div style='font-size:0.82rem;color:{SUBTEXT};'>{ds}</div></div>"
-            for ic,nm,ds in [
-                ("🦜","LangChain","Framework connecting all AI components"),
-                ("🕸️","LangGraph","Builds the multi-step agent workflow"),
-                ("🤖","Groq LLaMA3","Fast LLM for writing research reports"),
-                ("🔍","Tavily API","Real-time web search for current data"),
-                ("🚀","Streamlit","Web UI deployed on Streamlit Cloud"),
-                ("📄","ReportLab","Professional PDF report generation"),
-            ]
-        ])}
-        </div>
+    <div class='card'>
+      <div style='font-size:1.1rem;font-weight:700;color:{TEXT};margin-bottom:1.2rem;'>
+        ⚡ Tech Stack
+      </div>
+      <div style='display:grid;grid-template-columns:repeat(3,1fr);gap:0.8rem;'>
+      {"".join([
+          f"<div style='padding:0.9rem;background:{CARD2};border-radius:12px;"
+          f"border:1px solid {BORDER};transition:all 0.2s;'>"
+          f"<div style='font-weight:700;color:{ACCENT};margin-bottom:0.3rem;"
+          f"font-size:0.95rem;'>{ic} {nm}</div>"
+          f"<div style='font-size:0.82rem;color:{SUBTEXT};line-height:1.5;'>{ds}</div></div>"
+          for ic,nm,ds in [
+              ("🦜","LangChain","Framework connecting all AI components"),
+              ("🕸️","LangGraph","Builds the multi-step agent workflow"),
+              ("🤖","Groq LLaMA3","Fast LLM for analysis and writing"),
+              ("🔍","Tavily API","Real-time web search for current data"),
+              ("🚀","Streamlit","Web UI deployed on Streamlit Cloud"),
+              ("📄","ReportLab","Professional PDF report generation"),
+          ]
+      ])}
+      </div>
     </div>
     """, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
     c1,c2,c3 = st.columns([1,2,1])
     with c2:
-        if st.button("🔍  Try ResearchAI Now →", type="primary", key="try"):
-            st.session_state.page = "home"
+        if st.button("💬 Try Chat AI Now →", type="primary", key="try_chat"):
+            st.session_state.page = "chat"
             st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
-# REPORT PAGE
+# ── REPORT VIEW PAGE
 # ══════════════════════════════════════════════════════════════════════════════
 elif st.session_state.current_report:
     cur = st.session_state.current_report
@@ -843,42 +1006,38 @@ elif st.session_state.current_report:
 
     with m:
         st.markdown(f"""
-        <div class="card">
-            <div style='display:flex;justify-content:space-between;
-                        align-items:flex-start;'>
-                <div>
-                    <div style='font-size:1.25rem;font-weight:700;
-                                color:{TEXT};'>📄 {cur['topic']}</div>
-                    <div style='font-size:0.85rem;color:{SUBTEXT};
-                                margin-top:0.3rem;'>
-                        {datetime.now().strftime("%B %d, %Y at %H:%M")}
-                        &nbsp;·&nbsp; Groq LLaMA3 + Tavily
-                    </div>
-                </div>
-                <div style='background:rgba(16,185,129,0.1);
-                            color:#10b981!important;
-                            border:1px solid rgba(16,185,129,0.3);
-                            border-radius:20px;padding:0.3rem 0.8rem;
-                            font-size:0.8rem;font-weight:600;'>
-                    ✅ Complete
-                </div>
+        <div class='card fade-in'>
+          <div style='display:flex;justify-content:space-between;align-items:flex-start;'>
+            <div>
+              <div style='font-size:1.25rem;font-weight:700;color:{TEXT};'>
+                📄 {cur['topic']}
+              </div>
+              <div style='font-size:0.85rem;color:{SUBTEXT};margin-top:0.3rem;'>
+                {datetime.now().strftime("%B %d, %Y at %H:%M")}
+                &nbsp;·&nbsp; Groq LLaMA3 + Tavily
+              </div>
             </div>
+            <div style='background:rgba(16,185,129,0.1);color:#10b981!important;
+                        border:1px solid rgba(16,185,129,0.3);border-radius:20px;
+                        padding:0.3rem 0.9rem;font-size:0.8rem;font-weight:600;'>
+              ✅ Complete
+            </div>
+          </div>
         </div>
-        <div class="card">
-            <div class="report-text">{cur['report']}</div>
+        <div class='card'>
+          <div class='report-text'>{cur['report']}</div>
         </div>
         """, unsafe_allow_html=True)
         if st.button("🔍  New Research", type="primary", key="new_res"):
             st.session_state.current_report = None
-            st.session_state.page = "home"
+            st.session_state.page = "research"
             st.rerun()
 
     with s:
         st.markdown(f"""
-        <div class="card">
-            <div style='font-weight:700;font-size:0.95rem;
-                        color:{TEXT};margin-bottom:0.8rem;'>
-                🤖 Agent Steps</div>
+        <div class='card'>
+          <div style='font-weight:700;font-size:0.95rem;
+                      color:{TEXT};margin-bottom:0.8rem;'>🤖 Agent Steps</div>
         """, unsafe_allow_html=True)
         for step in cur['steps']:
             st.markdown(f'<div class="badge">✅ {step}</div>',
@@ -894,32 +1053,69 @@ elif st.session_state.current_report:
 
 st.markdown("</div>", unsafe_allow_html=True)
 
-# Footer
+# ── FOOTER (inverted from theme - point 2) ────────────────────────────────────
 st.markdown(f"""
 <div style='
   margin-top:4rem;
-  background:{'#0a0d14' if dark else '#1e293b'};
+  background:{FOOT_BG};
   border-top:3px solid {ACCENT};
-  padding:2.2rem 2rem 1.6rem 2rem;
-  text-align:center;
+  padding:2.5rem 3rem 2rem 3rem;
 '>
-  <div style='font-size:1.05rem;font-weight:800;color:#ffffff;margin-bottom:0.35rem;'>🔬 ResearchAI</div>
-  <div style='font-size:0.82rem;color:rgba(255,255,255,0.55);margin-bottom:1rem;'>
-    AI-powered research reports — instantly.
-  </div>
-  <div style='display:flex;justify-content:center;gap:1.8rem;margin-bottom:1.1rem;'>
-    <a href='https://github.com/nevedhya03-dotcom' target='_blank'
-       style='color:rgba(255,255,255,0.7);text-decoration:none;font-size:0.83rem;font-weight:500;
-              transition:color 0.18s;'>GitHub</a>
-    <span style='color:rgba(255,255,255,0.25);'>·</span>
-    <span style='color:rgba(255,255,255,0.55);font-size:0.83rem;'>Groq LLaMA3 + Tavily</span>
-    <span style='color:rgba(255,255,255,0.25);'>·</span>
-    <span style='color:rgba(255,255,255,0.55);font-size:0.83rem;'>LangGraph + Streamlit</span>
-  </div>
-  <div style='font-size:0.75rem;color:rgba(255,255,255,0.3);'>
-    Built with ❤️ by
-    <a href='https://github.com/nevedhya03-dotcom' target='_blank'
-       style='color:{ACCENT};text-decoration:none;font-weight:600;'>Nevedhya Patni</a>
+  <div style='max-width:1100px;margin:0 auto;'>
+    <div style='display:grid;grid-template-columns:2fr 1fr 1fr;
+                gap:2rem;margin-bottom:2rem;'>
+      <div>
+        <div style='font-size:1.1rem;font-weight:800;
+                    color:{FOOT_HEAD};margin-bottom:0.5rem;'>
+          🔬 ResearchAI
+        </div>
+        <div style='font-size:0.85rem;color:{FOOT_TEXT};line-height:1.7;
+                    max-width:320px;'>
+          Your personal AI assistant for research and chat.
+          Powered by Groq LLaMA3, Tavily, and LangGraph.
+          Built for students, researchers, and professionals.
+        </div>
+      </div>
+      <div>
+        <div style='font-weight:700;font-size:0.85rem;
+                    color:{FOOT_HEAD};margin-bottom:0.8rem;
+                    text-transform:uppercase;letter-spacing:0.05em;'>
+          Navigation
+        </div>
+        {"".join([
+            f"<div style='font-size:0.83rem;color:{FOOT_TEXT};"
+            f"margin-bottom:0.4rem;'>{item}</div>"
+            for item in ["🏠 Home","💬 Chat AI","🔍 Research","❓ How it Works"]
+        ])}
+      </div>
+      <div>
+        <div style='font-weight:700;font-size:0.85rem;
+                    color:{FOOT_HEAD};margin-bottom:0.8rem;
+                    text-transform:uppercase;letter-spacing:0.05em;'>
+          Tech Stack
+        </div>
+        {"".join([
+            f"<div style='font-size:0.83rem;color:{FOOT_TEXT};"
+            f"margin-bottom:0.4rem;'>{item}</div>"
+            for item in ["🦜 LangChain","🕸️ LangGraph","🤖 Groq LLaMA3",
+                         "🔍 Tavily API","🚀 Streamlit"]
+        ])}
+      </div>
+    </div>
+    <div style='border-top:1px solid {"rgba(0,0,0,0.1)" if dark else "rgba(255,255,255,0.1)"};
+                padding-top:1.2rem;display:flex;justify-content:space-between;
+                align-items:center;flex-wrap:wrap;gap:0.5rem;'>
+      <div style='font-size:0.8rem;color:{FOOT_TEXT};'>
+        Built with ❤️ by
+        <a href='https://github.com/nevedhya03-dotcom' target='_blank'
+           style='color:{ACCENT};text-decoration:none;font-weight:700;'>
+          Nevedhya Patni
+        </a>
+      </div>
+      <div style='font-size:0.8rem;color:{FOOT_TEXT};'>
+        © 2026 ResearchAI · All rights reserved
+      </div>
+    </div>
   </div>
 </div>
 """, unsafe_allow_html=True)
